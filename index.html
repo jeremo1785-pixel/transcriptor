@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Transcriptor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎼</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Transcriptor">
+  <meta name="theme-color" content="#0e1117">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">🎼 Transcriptor</a>
+    <span class="tagline">Del audio a las notas · todo en tu iPad</span>
+  </header>
+
+  <main>
+    <!-- ============================================================ INICIO -->
+    <section id="home" class="view">
+      <div class="card new">
+        <h2>Nueva transcripción</h2>
+
+        <div class="seg" id="srcTabs" role="tablist">
+          <button data-src="file" class="on">📁 Archivo</button>
+          <button data-src="mic">🎙 Grabar</button>
+        </div>
+
+        <div class="src-pane" data-src="file">
+          <label class="drop" id="drop">
+            <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
+            <span class="drop-big">Tocá para elegir un audio o video</span>
+            <span class="drop-small">De Archivos, Fotos o iCloud · mp3, m4a, wav, mp4, mov…</span>
+            <span class="drop-file" id="fileName"></span>
+          </label>
+        </div>
+
+        <div class="src-pane" data-src="mic" hidden>
+          <div class="rec-row">
+            <button id="recBtn" class="rec">● Empezar a grabar</button>
+            <span id="recTime" class="mono">0:00</span>
+          </div>
+          <audio id="recPreview" controls hidden></audio>
+          <p class="hint">Grabá sin auriculares cerca del instrumento. Se desactiva la
+            supresión de ruido del navegador para no deformar el sonido.</p>
+        </div>
+
+        <p class="hint">La primera transcripción baja los modelos (unos 180 MB, conviene con Wi-Fi).
+          Después quedan guardados en el iPad y todo funciona sin internet.</p>
+
+        <h3>¿Qué vas a transcribir?</h3>
+        <div class="modes" id="modes"></div>
+
+        <div class="go-row">
+          <button id="goBtn" class="primary">Transcribir</button>
+          <span id="newMsg" class="msg"></span>
+        </div>
+      </div>
+
+      <div class="library">
+        <h2>Tus transcripciones</h2>
+        <ul id="jobs" class="jobs"></ul>
+        <p id="emptyLib" class="hint" hidden>Todavía no hay nada. Cargá una canción arriba.</p>
+      </div>
+    </section>
+
+    <!-- ============================================================ REPRODUCTOR -->
+    <section id="player" class="view" hidden>
+      <div class="p-head">
+        <a href="#/" class="back" title="Volver">←</a>
+        <div class="p-title">
+          <h2 id="pTitle"></h2>
+          <div class="chips" id="pChips"></div>
+        </div>
+        <div class="seg" id="viewTabs">
+          <button data-view="roll" class="on">Notas</button>
+          <button data-view="sheet">Partitura</button>
+        </div>
+        <button id="sideBtn" class="ghost side-btn" title="Pistas y opciones">☰ Opciones</button>
+        <div class="menu-wrap">
+          <button id="exportBtn" class="ghost">⬇ Exportar</button>
+          <div class="menu" id="exportMenu" hidden>
+            <button data-exp="xml">Partitura MusicXML <small>MuseScore, Sibelius, Finale, Dorico, Logic</small></button>
+            <button data-exp="midi">MIDI alineado al compás <small>Para DAW y editores de partituras</small></button>
+            <button data-exp="midiraw">MIDI con los tiempos reales <small>Sigue exactamente la grabación</small></button>
+            <p class="menu-note">Se exportan las pistas visibles, con la transposición actual. En el iPad se abre «Compartir»: Guardar en Archivos, MuseScore, AirDrop…</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-body">
+        <div class="stage" id="stage">
+          <canvas id="roll"></canvas>
+          <div id="sheetWrap" hidden>
+            <div id="sheetMsg" class="sheet-msg"></div>
+            <div id="sheet"></div>
+          </div>
+          <div id="transposeNote" class="float-note" hidden>
+            La grabación original no se transpone: bajá «Original» en la mezcla para
+            escuchar solo las notas en el tono nuevo.
+          </div>
+        </div>
+
+        <aside class="side" id="side">
+          <section id="practicePanel" class="practice" hidden>
+            <div class="p-top">
+              <h4>🎹 Práctica</h4>
+              <button class="icon" id="pClose" title="Salir de la práctica">✕</button>
+            </div>
+            <div class="seg small wide" id="pSrc">
+              <button data-src="midi" class="on">Teclado MIDI</button>
+              <button data-src="mic">Micrófono</button>
+            </div>
+            <p class="hint small" id="pDev"></p>
+            <div id="pMicRow" hidden>
+              <div class="meter"><i id="pMeter"></i></div>
+              <div class="field"><span>Sensibilidad</span>
+                <input type="range" id="pSens" min="8" max="30" value="18" title="Más a la izquierda = detecta más fácil"></div>
+            </div>
+            <div class="p-label">Qué tocás vos</div>
+            <div id="pParts" class="p-parts"></div>
+            <label class="check"><input type="checkbox" id="pWait" checked> Esperar a que toque la nota</label>
+            <label class="check"><input type="checkbox" id="pHear"> Escuchar también mi parte</label>
+            <label class="check" id="pEchoRow"><input type="checkbox" id="pEcho"> Sonar lo que toco <small>(teclados sin parlante)</small></label>
+            <div class="score">
+              <div><b id="pHits">0</b><span>aciertos</span></div>
+              <div><b id="pMiss">0</b><span>errores</span></div>
+              <div><b id="pPct">–</b><span>precisión</span></div>
+            </div>
+            <div id="pStatus" class="p-status"></div>
+            <button class="ghost wide" id="pRestart">↺ Empezar de nuevo</button>
+          </section>
+
+          <h4>Pistas</h4>
+          <ul id="tracks" class="tracks"></ul>
+
+          <h4>Ritmo</h4>
+          <div class="field">
+            <span>Tempo</span>
+            <div class="seg small" id="tempoSeg">
+              <button data-f="0.5">½</button><button data-f="1" class="on">×1</button><button data-f="2">×2</button>
+            </div>
+          </div>
+          <div class="field">
+            <span>Compás</span>
+            <select id="meterSel">
+              <option value="">Automático</option>
+              <option value="2">2/4</option><option value="3">3/4</option>
+              <option value="4">4/4</option><option value="5">5/4</option>
+              <option value="6">6/4</option><option value="7">7/4</option>
+            </select>
+          </div>
+          <p class="hint small">Si la partitura sale con el doble de compases (o notas muy
+            largas), probá «½» o «×2».</p>
+
+          <h4>Vista</h4>
+          <label class="check"><input type="checkbox" id="optNames" checked> Nombre de las notas</label>
+          <label class="check"><input type="checkbox" id="optLatin" checked> Do-Re-Mi (en vez de C-D-E)</label>
+          <label class="check"><input type="checkbox" id="optFull"> Teclado completo (88 teclas)</label>
+          <div class="field"><span>Velocidad de caída</span>
+            <input type="range" id="zoom" min="60" max="400" value="170"></div>
+
+          <h4>Sonido de las notas</h4>
+          <div class="seg small" id="soundSeg">
+            <button data-s="piano" class="on">Piano</button>
+            <button data-s="inst">Cada instrumento</button>
+          </div>
+          <p class="hint small" id="sfStatus"></p>
+        </aside>
+      </div>
+
+      <div class="transport">
+        <button id="playBtn" class="play" title="Reproducir / pausa (espacio)">▶</button>
+        <span id="tNow" class="mono">0:00</span>
+        <div class="seek" id="seek">
+          <div class="seek-loop" id="seekLoop" hidden></div>
+          <div class="seek-fill" id="seekFill"></div>
+          <div class="seek-head" id="seekHead"></div>
+        </div>
+        <span id="tEnd" class="mono">0:00</span>
+
+        <div class="ctl">
+          <label>Velocidad</label>
+          <select id="speedSel">
+            <option value="0.5">50%</option><option value="0.6">60%</option>
+            <option value="0.7">70%</option><option value="0.8">80%</option>
+            <option value="0.9">90%</option><option value="1" selected>100%</option>
+            <option value="1.1">110%</option><option value="1.25">125%</option>
+          </select>
+        </div>
+        <div class="ctl mix">
+          <label>Original</label>
+          <input type="range" id="mix" min="0" max="100" value="50" title="Mezcla entre la grabación y las notas transcriptas">
+          <label>Notas</label>
+        </div>
+        <div class="ctl">
+          <label>Tono</label>
+          <button class="mini" id="trDown">−</button>
+          <span id="trVal" class="mono tr-val">0</span>
+          <button class="mini" id="trUp">+</button>
+        </div>
+        <button id="metroBtn" class="toggle" title="Metrónomo">𝅘𝅥 Metrónomo</button>
+        <button id="loopBtn" class="toggle" title="Bucle A-B">🔁 Bucle</button>
+        <button id="practiceBtn" class="toggle practice-btn" title="Practicar con tu piano">🎹 Practicar</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="vendor/soundfont-player.min.js"></script>
+  <script src="vendor/opensheetmusicdisplay.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
