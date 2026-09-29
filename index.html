@@ -87,10 +87,11 @@
         <div class="menu-wrap">
           <button id="exportBtn" class="ghost">⬇ Exportar</button>
           <div class="menu" id="exportMenu" hidden>
+            <button data-exp="pdf">Partitura en PDF <small>Para imprimir o mandar. Sale igual que la vista de partitura</small></button>
             <button data-exp="xml">Partitura MusicXML <small>MuseScore, Sibelius, Finale, Dorico, Logic</small></button>
             <button data-exp="midi">MIDI alineado al compás <small>Para DAW y editores de partituras</small></button>
             <button data-exp="midiraw">MIDI con los tiempos reales <small>Sigue exactamente la grabación</small></button>
-            <p class="menu-note">Se exportan las pistas visibles, con la transposición actual. En el iPad se abre «Compartir»: Guardar en Archivos, MuseScore, AirDrop…</p>
+            <p class="menu-note">Se exportan las pistas visibles, con la transposición actual (para un instrumento solo, ocultá las demás con 👁). En el iPad se abre «Compartir»: Guardar en Archivos, MuseScore, AirDrop…</p>
           </div>
         </div>
       </div>
@@ -218,6 +219,8 @@
 
   <script src="vendor/soundfont-player.min.js"></script>
   <script src="vendor/opensheetmusicdisplay.min.js"></script>
+  <script src="vendor/jspdf.umd.min.js"></script>
+  <script src="pdfexport.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

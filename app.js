@@ -1696,7 +1696,12 @@ function initPlayer() {
       const ids = [...new Set(player.tracks.filter(t => t.visible).map(t => t.id))];
       const base = slug(player.data.title) + (player.transpose ? `_${player.transpose > 0 ? "+" : ""}${player.transpose}` : "");
       let file;
-      if (b.dataset.exp === "xml") {
+      if (b.dataset.exp === "pdf") {
+        if (!player.visibleIds().length) throw new Error("no hay pistas visibles con notas");
+        toast("Armando el PDF…", 60000);
+        file = new File([await sheetToPdf(sheet.xml())], base + ".pdf", { type: "application/pdf" });
+        toast("PDF listo");
+      } else if (b.dataset.exp === "xml") {
         file = new File([sheet.xml()], base + ".musicxml", { type: "application/vnd.recordare.musicxml+xml" });
       } else {
         const bytes = buildMidi(player.data, { transpose: player.transpose, aligned: b.dataset.exp === "midi", trackIds: ids });
