@@ -221,3 +221,8 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 7p
 .p-status .bad { color: var(--err); font-weight: 700; }
 .ghost.wide { width: 100%; }
 .practice-btn.on { border-color: #43d17a; color: #b8f5cd; background: #173a26; }
+
+/* Selector de archivo invisible pero "presente": con display:none algunas
+   versiones de Safari en iPad no lo abren o no dejan elegir el archivo. */
+.file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+.drop { position: relative; }

@@ -106,6 +106,8 @@ async function initHome() {
   });
 
   const drop = $("#drop"), input = $("#fileInput");
+  // Sin filtro de tipo: en el iPad, filtrar por "audio/*" deja los mp3 de
+  // Archivos en gris. Si el archivo no es audio, lo avisa al decodificarlo.
   input.onchange = () => setFile(input.files[0]);
   drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
   drop.ondragleave = () => drop.classList.remove("over");
