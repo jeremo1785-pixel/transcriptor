@@ -81,6 +81,7 @@
           <button data-view="roll" class="on">Notas</button>
           <button data-view="sheet">Partitura</button>
         </div>
+        <button id="sheetNamesBtn" class="toggle" hidden title="Escribir el nombre de cada nota debajo del pentagrama">Aa Nombres</button>
         <button id="sideBtn" class="ghost side-btn" title="Pistas y opciones">☰ Opciones</button>
         <div class="menu-wrap">
           <button id="exportBtn" class="ghost">⬇ Exportar</button>
@@ -159,7 +160,8 @@
             largas), probá «½» o «×2».</p>
 
           <h4>Vista</h4>
-          <label class="check"><input type="checkbox" id="optNames" checked> Nombre de las notas</label>
+          <label class="check"><input type="checkbox" id="optNames" checked> Nombres en las notas que caen</label>
+          <label class="check"><input type="checkbox" id="optSheetNames"> Nombres en la partitura</label>
           <label class="check"><input type="checkbox" id="optLatin" checked> Do-Re-Mi (en vez de C-D-E)</label>
           <label class="check"><input type="checkbox" id="optFull"> Teclado completo (88 teclas)</label>
           <div class="field"><span>Velocidad de caída</span>

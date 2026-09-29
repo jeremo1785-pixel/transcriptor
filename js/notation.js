@@ -71,7 +71,22 @@ function pieces(pos, dur) {
   return out;
 }
 
-function noteXml(ev, piece, { staff, voice, fifths, tieStart, tieStop }) {
+// Nombre corto de una nota tal como se escribe en la armadura: "Si♭" o "B♭".
+const LATIN = { C: "Do", D: "Re", E: "Mi", F: "Fa", G: "Sol", A: "La", B: "Si" };
+export function noteLabel(midi, fifths, names) {
+  const [step, alter] = (fifths < 0 ? STEPS_FLAT : STEPS_SHARP)[midi % 12];
+  return (names === "latin" ? LATIN[step] : step) + (alter === 1 ? "♯" : alter === -1 ? "♭" : "");
+}
+
+// Nombres debajo del pentagrama (como "letra"): en los acordes, uno por
+// linea, de la nota mas aguda a la mas grave.
+function lyricsXml(ps, fifths, names) {
+  return [...ps].sort((a, b) => b - a)
+    .map((p, i) => `<lyric number="${i + 1}" placement="below"><syllabic>single</syllabic><text>${noteLabel(p, fifths, names)}</text></lyric>`)
+    .join("");
+}
+
+function noteXml(ev, piece, { staff, voice, fifths, tieStart, tieStop, names }) {
   const [len, type, dot] = piece;
   if (!ev) {
     return `<note><rest/><duration>${len}</duration><voice>${voice}</voice><type>${type}</type>${dot ? "<dot/>" : ""}${staff ? `<staff>${staff}</staff>` : ""}</note>`;
@@ -79,7 +94,9 @@ function noteXml(ev, piece, { staff, voice, fifths, tieStart, tieStop }) {
   return ev.ps.map((p, i) => {
     const ties = (tieStop ? '<tie type="stop"/>' : "") + (tieStart ? '<tie type="start"/>' : "");
     const tied = (tieStop ? '<tied type="stop"/>' : "") + (tieStart ? '<tied type="start"/>' : "");
-    return `<note>${i ? "<chord/>" : ""}${pitchXml(p, fifths)}<duration>${len}</duration>${ties}<voice>${voice}</voice><type>${type}</type>${dot ? "<dot/>" : ""}${staff ? `<staff>${staff}</staff>` : ""}${tied ? `<notations>${tied}</notations>` : ""}</note>`;
+    // El nombre va solo donde la nota se toca, no en su continuacion ligada.
+    const lyr = names && i === 0 && !tieStop ? lyricsXml(ev.ps, fifths, names) : "";
+    return `<note>${i ? "<chord/>" : ""}${pitchXml(p, fifths)}<duration>${len}</duration>${ties}<voice>${voice}</voice><type>${type}</type>${dot ? "<dot/>" : ""}${staff ? `<staff>${staff}</staff>` : ""}${tied ? `<notations>${tied}</notations>` : ""}${lyr}</note>`;
   }).join("");
 }
 
@@ -113,7 +130,8 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-export function buildMusicXml(data, { transpose = 0, trackIds = null } = {}) {
+// names: null (partitura normal), "latin" (Do Re Mi) o "letters" (C D E).
+export function buildMusicXml(data, { transpose = 0, trackIds = null, names = null } = {}) {
   const bm = new BeatMap(data.beats);
   const bpb = data.beats_per_bar || 4;
   const shift = barShift(data, bm);
@@ -173,7 +191,7 @@ export function buildMusicXml(data, { transpose = 0, trackIds = null } = {}) {
       }
       staves.forEach((s, si) => {
         if (si > 0) body += `<backup><duration>${m1 - m0}</duration></backup>`;
-        body += measureStaff(s.seq, m0, m1, { staff: staves.length > 1 ? si + 1 : 0, voice: si * 4 + 1, fifths });
+        body += measureStaff(s.seq, m0, m1, { staff: staves.length > 1 ? si + 1 : 0, voice: si * 4 + 1, fifths, names });
       });
       if (mi === bounds.length - 1) body += `<barline location="right"><bar-style>light-heavy</bar-style></barline>`;
       body += `</measure>`;

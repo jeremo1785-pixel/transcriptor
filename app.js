@@ -804,6 +804,7 @@ function setView(v) {
   $$("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
   $("#roll").hidden = v !== "roll";
   $("#sheetWrap").hidden = v !== "sheet";
+  $("#sheetNamesBtn").hidden = v !== "sheet";
   if (v === "sheet") sheet.show();
 }
 
@@ -1021,8 +1022,12 @@ const sheet = {
   invalidate() { this.key = null; },
 
   // Clave de lo que se esta mostrando: si cambia, se vuelve a dibujar.
+  names() {
+    return $("#optSheetNames").checked ? ($("#optLatin").checked ? "latin" : "letters") : null;
+  },
+
   url() {
-    return JSON.stringify([player.id, player.transpose, player.visibleIds(), player.data.settings]);
+    return JSON.stringify([player.id, player.transpose, player.visibleIds(), player.data.settings, this.names()]);
   },
 
   xml() {
@@ -1030,6 +1035,7 @@ const sheet = {
     return buildMusicXml(player.data, {
       transpose: player.transpose,
       trackIds: ids.length !== player.allIds().length ? ids : null,
+      names: this.names(),
     });
   },
 
@@ -1597,7 +1603,31 @@ function initPlayer() {
   }));
 
   $("#optFull").onchange = () => player.computeRange();
-  $("#optLatin").onchange = () => renderChips();
+  // Nombres en la partitura: en el panel y como boton rapido arriba.
+  const syncNamesBtn = () => $("#sheetNamesBtn").classList.toggle("on", $("#optSheetNames").checked);
+  const refreshSheet = () => { syncNamesBtn(); if (player.view === "sheet") sheet.show(); };
+  const remember = () => {
+    try {
+      localStorage.setItem("sheetNames", $("#optSheetNames").checked ? "1" : "0");
+      localStorage.setItem("latin", $("#optLatin").checked ? "1" : "0");
+    } catch { /* sin almacenamiento local */ }
+  };
+  try {
+    if (localStorage.getItem("sheetNames") === "1") $("#optSheetNames").checked = true;
+    if (localStorage.getItem("latin") === "0") $("#optLatin").checked = false;
+  } catch { /* sin almacenamiento local */ }
+  syncNamesBtn();
+  $("#optSheetNames").onchange = () => { remember(); refreshSheet(); };
+  $("#sheetNamesBtn").onclick = () => {
+    $("#optSheetNames").checked = !$("#optSheetNames").checked;
+    remember();
+    refreshSheet();
+  };
+  $("#optLatin").onchange = () => {
+    remember();
+    renderChips();
+    if ($("#optSheetNames").checked) refreshSheet();
+  };
 
   const setRhythm = async (body) => {
     try {
