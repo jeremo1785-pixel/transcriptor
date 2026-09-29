@@ -172,6 +172,37 @@ function newId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+// ---------------------------------------------------------------- importar de la PC
+// La version de PC genera archivos .transcriptor con la transcripcion completa
+// (cualquier modo: banda, melodia, piano; incluso de links de YouTube) y el audio.
+const PACKAGE_MAGIC = "TRANSCRIPTOR1\n";
+
+async function isPackage(file) {
+  const head = new Uint8Array(await file.slice(0, PACKAGE_MAGIC.length).arrayBuffer());
+  return new TextDecoder().decode(head) === PACKAGE_MAGIC;
+}
+
+async function importPackage(file) {
+  const buf = await file.arrayBuffer();
+  const view = new DataView(buf);
+  const start = PACKAGE_MAGIC.length;
+  const len = view.getUint32(start);
+  const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, start + 4, len)));
+  if (meta.version !== 1 || !meta.data?.tracks) throw new Error("El archivo no es un paquete válido de la PC");
+  const audio = new Blob([new Uint8Array(buf, start + 4 + len)], { type: meta.audio_type || "audio/mpeg" });
+  const d = meta.data;
+  const id = newId();
+  d.title = meta.title;
+  await store.putBlob(id + ":audio", audio);
+  await store.putBlob(id + ":notes", d);
+  await store.put({
+    id, title: meta.title, mode: meta.mode, status: "ready", stage: "Listo", progress: 1,
+    created: Date.now(), duration: d.duration, key: d.key?.label, bpm: d.bpm, imported: true,
+    tracks: d.tracks.map(t => ({ id: t.id, label: t.label, count: t.notes.length })),
+  });
+  return meta.title;
+}
+
 async function submitNew() {
   const mode = ($("input[name=mode]:checked") || {}).value || "piano";
   const msg = $("#newMsg"), btn = $("#goBtn");
@@ -187,6 +218,14 @@ async function submitNew() {
       blob = home.recBlob;
     } else {
       if (!blob) throw new Error("Elegí un archivo primero");
+      if (await isPackage(blob)) {
+        const t = await importPackage(blob);
+        setFile(null);
+        $("#fileInput").value = "";
+        msg.textContent = `«${t}» importada desde la PC. Ya está en la lista.`;
+        refreshJobs();
+        return;
+      }
       title = blob.name.replace(/\.[^.]+$/, "");
     }
     const id = newId();
@@ -298,7 +337,7 @@ async function transcribeSong(id) {
 
 // ---------------------------------------------------------------- lista
 function jobMeta(j) {
-  const meta = [MODE_LABEL[j.mode] || j.mode];
+  const meta = [(MODE_LABEL[j.mode] || j.mode) + (j.imported ? " · desde la PC" : "")];
   if (j.duration) meta.push(fmtTime(j.duration));
   if (j.status === "ready") {
     if (j.key) meta.push(j.key);
@@ -333,7 +372,7 @@ async function refreshJobs() {
       <li class="job ${j.status}" data-id="${j.id}">
         <div class="job-title">${esc(j.title)}</div>
         <div class="job-actions">
-          ${j.status === "error" || j.status === "ready" ? `<button class="ghost retry" title="Volver a transcribir">↻</button>` : ""}
+          ${(j.status === "error" || j.status === "ready") && j.mode === "piano" ? `<button class="ghost retry" title="Volver a transcribir">↻</button>` : ""}
           <button class="icon del" title="Borrar">✕</button>
         </div>
         <div class="job-meta">${jobMeta(j)}</div>

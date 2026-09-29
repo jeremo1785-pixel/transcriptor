@@ -1,6 +1,6 @@
 // Service worker: guarda la app y los modelos en el iPad para que funcione
 // sin internet despues de la primera vez.
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL = `transcriptor-app-${VERSION}`;
 const MODELS = "transcriptor-modelos-v1";   // los modelos pesados, aparte: no se rebajan en cada version
 
