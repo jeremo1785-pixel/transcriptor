@@ -40,6 +40,106 @@ function chordSequence(qnotes) {
   return seq;
 }
 
+// ------------------------------------------------------------------ acordes
+// Cifrado para teclado facil (misma logica que notation.py de la PC):
+// [tipo MusicXML, intervalos, costo]. Los menos comunes tienen que ganar claro.
+const CHORD_KINDS = [
+  ["major", [0, 4, 7], 0],
+  ["minor", [0, 3, 7], 0],
+  ["dominant", [0, 4, 7, 10], 0.1],
+  ["diminished", [0, 3, 6], 0.1],
+  ["suspended-fourth", [0, 5, 7], 0.2],
+];
+// Acordes propios de la tonalidad [distancia a la tonica, tipo]: desempatan.
+const DIATONIC = {
+  major: [[0, "major"], [2, "minor"], [4, "minor"], [5, "major"], [7, "major"],
+    [7, "dominant"], [9, "minor"], [11, "diminished"]],
+  minor: [[0, "minor"], [2, "diminished"], [3, "major"], [5, "minor"], [7, "minor"],
+    [7, "major"], [7, "dominant"], [8, "major"], [10, "major"], [11, "diminished"]],
+};
+
+function bestChord(chroma, bass, tonic, mode) {
+  const total = chroma.reduce((a, b) => a + b, 0);
+  if (total < 0.5 || chroma.filter(c => c > 0.1 * total).length < 2) return null;
+  const diat = new Set((DIATONIC[mode] || DIATONIC.major).map(([d, k]) => `${(tonic + d) % 12}${k}`));
+  let best = null, bestS = -1e9;
+  for (let root = 0; root < 12; root++) {
+    for (const [kind, ivs, cost] of CHORD_KINDS) {
+      const tones = ivs.map(i => (root + i) % 12);
+      let inn = 0;
+      for (const t of tones) inn += chroma[t];
+      let s = inn - 0.7 * (total - inn) - cost * total;
+      s -= 0.15 * total * tones.filter(t => chroma[t] < 0.05 * total).length;
+      if (bass === root) s += 0.2 * total;
+      if (diat.has(`${root}${kind}`)) s += 0.08 * total;
+      if (s > bestS + 1e-9) { best = [root, kind]; bestS = s; }
+    }
+  }
+  return best;
+}
+
+// Acordes de la cancion: [{pos (en pulsos), root (0-11), kind}]. Cada compas
+// (o cada mitad en 4/4 y 6/4), con todas las pistas visibles y mas peso para
+// el bajo; a la mitad del compas solo si cambia.
+export function chordTrack(data, { transpose = 0, trackIds = null } = {}) {
+  const bm = new BeatMap(data.beats);
+  const bpb = data.beats_per_bar || 4;
+  const shift = barShift(data, bm);
+  const tonic = (((data.key.tonic + transpose) % 12) + 12) % 12;
+  const notes = [];
+  for (const t of data.tracks) {
+    if (t.id === "drums" || (trackIds && !trackIds.includes(t.id))) continue;
+    for (const [s, e, p] of t.notes) notes.push([bm.toBeat(s) + shift, bm.toBeat(e) + shift, p + transpose]);
+  }
+  if (!notes.length) return [];
+  const last = Math.max(...notes.map(n => n[1]));
+  const half = bpb === 4 || bpb === 6 ? bpb / 2 : bpb;
+  const out = [];
+  for (let b0 = 0; b0 < Math.ceil(last / bpb) * bpb; b0 += bpb) {
+    let prev = null;
+    for (let i = 0; i < bpb; i += half) {
+      const a = b0 + i, b = b0 + Math.min(i + half, bpb);
+      const chroma = new Array(12).fill(0);
+      let low = null;
+      for (const [s, e, p] of notes) {
+        const ov = Math.min(e, b) - Math.max(s, a);
+        if (ov <= 0) continue;
+        chroma[((p % 12) + 12) % 12] += ov;
+        if (ov >= 0.25 && (low === null || p < low)) low = p;
+      }
+      const ch = bestChord(chroma, low === null ? null : ((low % 12) + 12) % 12, tonic, data.key.mode);
+      if (ch && !(prev && ch[0] === prev[0] && ch[1] === prev[1])) out.push({ pos: a, root: ch[0], kind: ch[1] });
+      if (ch) prev = ch;
+    }
+  }
+  return out;
+}
+
+// Como se escribe la raiz: Si♭ y no La♯ en Do mayor o La menor; en menor, la
+// sensible con sostenido (Sol♯dim en La menor).
+const SHARPS = { 1: ["C", 1], 3: ["D", 1], 6: ["F", 1], 8: ["G", 1], 10: ["A", 1] };
+export function chordRoot(pc, fifths, tonic = 0, mode = "major") {
+  const white = { 0: "C", 2: "D", 4: "E", 5: "F", 7: "G", 9: "A", 11: "B" };
+  if (pc in white) return [white[pc], 0];
+  if (mode === "minor" && pc === (tonic + 11) % 12) return SHARPS[pc];
+  const black = fifths >= 4 ? SHARPS
+    : fifths >= 2 ? { 1: ["C", 1], 3: ["E", -1], 6: ["F", 1], 8: ["G", 1], 10: ["B", -1] }
+    : fifths >= 0 ? { 1: ["C", 1], 3: ["E", -1], 6: ["F", 1], 8: ["A", -1], 10: ["B", -1] }
+    : fifths >= -3 ? { 1: ["D", -1], 3: ["E", -1], 6: ["F", 1], 8: ["A", -1], 10: ["B", -1] }
+    : { 1: ["D", -1], 3: ["E", -1], 6: ["G", -1], 8: ["A", -1], 10: ["B", -1] };
+  return black[pc];
+}
+
+function harmonyXml(h, staff) {
+  const [step, alter] = h.spelled;
+  return `<harmony><root><root-step>${step}</root-step>${alter ? `<root-alter>${alter}</root-alter>` : ""}</root>` +
+    `<kind>${h.kind}</kind>${staff ? `<staff>${staff}</staff>` : ""}</harmony>`;
+}
+
+// Que pista lleva la melodia en la partitura facil.
+const MELODY_ORDER = ["melodia", "vocals", "piano", "guitar", "other", "bass"];
+
+
 // ------------------------------------------------------------------ escritura
 const STEPS_SHARP = [["C", 0], ["C", 1], ["D", 0], ["D", 1], ["E", 0], ["F", 0], ["F", 1], ["G", 0], ["G", 1], ["A", 0], ["A", 1], ["B", 0]];
 const STEPS_FLAT = [["C", 0], ["D", -1], ["D", 0], ["E", -1], ["E", 0], ["F", 0], ["G", -1], ["G", 0], ["A", -1], ["A", 0], ["B", -1], ["B", 0]];
@@ -103,26 +203,43 @@ function noteXml(ev, piece, { staff, voice, fifths, tieStart, tieStop, names }) 
 // Contenido de un compas para un pentagrama: notas y silencios que lo llenan.
 function measureStaff(seq, m0, m1, opts) {
   let xml = "", pos = m0;
+  // Cifrado: se ancla en la primera figura (nota o silencio) que empieza desde
+  // su lugar, porque OSMD no ubica un acorde en medio de una nota larga. Si
+  // varios caen en la misma figura queda el primero.
+  const harm = opts.harm || [];
+  let hi = 0;
+  const chordAt = x => {
+    let h = "";
+    if (hi < harm.length && harm[hi].pos <= x) h = harmonyXml(harm[hi], opts.staff);
+    while (hi < harm.length && harm[hi].pos <= x) hi++;
+    return h;
+  };
   const evs = seq.filter(e => e.off < m1 && e.off + e.dur > m0);
   if (!evs.length) {
     const len = m1 - m0;
-    return `<note><rest measure="yes"/><duration>${len}</duration><voice>${opts.voice}</voice>${opts.staff ? `<staff>${opts.staff}</staff>` : ""}</note>`;
+    return chordAt(m0) + `<note><rest measure="yes"/><duration>${len}</duration><voice>${opts.voice}</voice>${opts.staff ? `<staff>${opts.staff}</staff>` : ""}</note>`;
   }
+  const rests = (from, len) => {
+    let x = from;
+    for (const pc of pieces(from - m0, len)) { xml += chordAt(x) + noteXml(null, pc, opts); x += pc[0]; }
+  };
   for (const e of evs) {
     const a = Math.max(e.off, m0), b = Math.min(e.off + e.dur, m1);
-    if (a > pos) { for (const pc of pieces(pos - m0, a - pos)) xml += noteXml(null, pc, opts); }
+    if (a > pos) rests(pos, a - pos);
     const ps = pieces(a - m0, b - a);
+    let x = a;
     ps.forEach((pc, i) => {
       const first = i === 0, last = i === ps.length - 1;
-      xml += noteXml(e, pc, {
+      xml += chordAt(x) + noteXml(e, pc, {
         ...opts,
         tieStop: !first || a > e.off,                 // viene de antes (otra figura o el compas anterior)
         tieStart: !last || b < e.off + e.dur,         // sigue despues
       });
+      x += pc[0];
     });
     pos = b;
   }
-  if (pos < m1) for (const pc of pieces(pos - m0, m1 - pos)) xml += noteXml(null, pc, opts);
+  if (pos < m1) rests(pos, m1 - pos);
   return xml;
 }
 
@@ -131,7 +248,8 @@ function esc(s) {
 }
 
 // names: null (partitura normal), "latin" (Do Re Mi) o "letters" (C D E).
-export function buildMusicXml(data, { transpose = 0, trackIds = null, names = null } = {}) {
+// chords: cifrado arriba del pentagrama; easy: partitura facil (solo la melodia, con cifrado).
+export function buildMusicXml(data, { transpose = 0, trackIds = null, names = null, chords = false, easy = false } = {}) {
   const bm = new BeatMap(data.beats);
   const bpb = data.beats_per_bar || 4;
   const shift = barShift(data, bm);
@@ -140,7 +258,7 @@ export function buildMusicXml(data, { transpose = 0, trackIds = null, names = nu
   if (!tracks.length) throw new Error("No hay pistas con notas para la partitura");
 
   // Pentagramas de cada parte.
-  const parts = tracks.map(t => {
+  let parts = tracks.map(t => {
     const q = quantize(t.notes, bm, shift, transpose);
     if (t.id === "piano") {
       const hands = t.hands || assignHands(t.notes);
@@ -153,6 +271,22 @@ export function buildMusicXml(data, { transpose = 0, trackIds = null, names = nu
     const clef = t.id === "bass" ? "F" : t.id === "guitar" ? "G8" : med < 55 ? "F" : "G";
     return { t, staves: [{ seq: chordSequence(q), clef }] };
   });
+
+  if (easy) {
+    // Solo la melodia: la nota mas aguda de la pista que la lleva (en el piano,
+    // la mano derecha). El acompanamiento queda en el cifrado.
+    const rank = t => (MELODY_ORDER.includes(t.id) ? MELODY_ORDER.indexOf(t.id) : 99);
+    const t = [...tracks].sort((x, y) => rank(x) - rank(y))[0];
+    let q = quantize(t.notes, bm, shift, transpose);
+    if (t.id === "piano") {
+      const hands = t.hands || assignHands(t.notes);
+      const rh = q.filter((_, i) => hands[i] === 1);
+      if (rh.length) q = rh;
+    }
+    const seq = chordSequence(q).map(e => ({ ...e, ps: [Math.max(...e.ps)] }));
+    const clef = t.id === "piano" || t.id === "melodia" ? "G" : parts.find(p => p.t === t).staves[0].clef;
+    parts = [{ t: { ...t, label: "Melodía" }, staves: [{ seq, clef }] }];
+  }
 
   const L = bpb * Q;
   const lastEnd = Math.max(...parts.flatMap(p => p.staves.flatMap(s => s.seq.map(e => e.off + e.dur))), 1);
@@ -168,6 +302,18 @@ export function buildMusicXml(data, { transpose = 0, trackIds = null, names = nu
   const clefXml = (c, n) => c === "F"
     ? `<clef${n ? ` number="${n}"` : ""}><sign>F</sign><line>4</line></clef>`
     : `<clef${n ? ` number="${n}"` : ""}><sign>G</sign><line>2</line>${c === "G8" ? "<clef-octave-change>-1</clef-octave-change>" : ""}</clef>`;
+
+  // Cifrado por compas (en semicorcheas absolutas), para el pentagrama de arriba.
+  const harmByBar = {};
+  if (chords || easy) {
+    const tonic = (((data.key.tonic + transpose) % 12) + 12) % 12;
+    for (const h of chordTrack(data, { transpose, trackIds })) {
+      const bar = Math.floor(h.pos / bpb);
+      (harmByBar[bar] = harmByBar[bar] || []).push({
+        pos: Math.round(h.pos * Q), kind: h.kind, spelled: chordRoot(h.root, fifths, tonic, data.key.mode),
+      });
+    }
+  }
 
   let partList = "", body = "";
   parts.forEach(({ t, staves }, pi) => {
@@ -191,7 +337,8 @@ export function buildMusicXml(data, { transpose = 0, trackIds = null, names = nu
       }
       staves.forEach((s, si) => {
         if (si > 0) body += `<backup><duration>${m1 - m0}</duration></backup>`;
-        body += measureStaff(s.seq, m0, m1, { staff: staves.length > 1 ? si + 1 : 0, voice: si * 4 + 1, fifths, names });
+        const harm = pi === 0 && si === 0 ? harmByBar[mi] : null;
+        body += measureStaff(s.seq, m0, m1, { staff: staves.length > 1 ? si + 1 : 0, voice: si * 4 + 1, fifths, names, harm });
       });
       if (mi === bounds.length - 1) body += `<barline location="right"><bar-style>light-heavy</bar-style></barline>`;
       body += `</measure>`;

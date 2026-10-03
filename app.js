@@ -372,8 +372,8 @@ async function refreshJobs() {
       <li class="job ${j.status}" data-id="${j.id}">
         <div class="job-title">${esc(j.title)}</div>
         <div class="job-actions">
-          ${(j.status === "error" || j.status === "ready") && j.mode === "piano" ? `<button class="ghost retry" title="Volver a transcribir">↻</button>` : ""}
-          <button class="icon del" title="Borrar">✕</button>
+          ${(j.status === "error" || j.status === "ready") && j.mode === "piano" ? `<button class="ghost retry" title="Volver a transcribir"><svg class="ic"><use href="#i-restart"/></svg></button>` : ""}
+          <button class="icon del" title="Borrar"><svg class="ic"><use href="#i-x"/></svg></button>
         </div>
         <div class="job-meta">${jobMeta(j)}</div>
         ${busy ? `<div class="bar"><i style="width:${Math.max(2, (l.progress || 0) * 100)}%"></i></div>` : ""}
@@ -819,7 +819,7 @@ function renderTracks() {
     <li class="track ${t.visible ? "" : "hidden"}" data-i="${i}">
       <span class="dot" style="background:${t.color}"></span>
       <span class="name">${esc(t.label)}<small>${t.hand != null ? "Piano · " : ""}${t.notes.length} notas</small></span>
-      ${t.id === "drums" ? "" : `<button class="tbtn v ${t.visible ? "" : "off-v"}" title="Mostrar / ocultar">👁</button>`}
+      ${t.id === "drums" ? "" : `<button class="tbtn v ${t.visible ? "" : "off-v"}" title="Mostrar / ocultar"><svg class="ic"><use href="#i-eye"/></svg></button>`}
       <button class="tbtn m ${t.mute ? "on-m" : ""}" title="Silenciar las notas de esta pista">M</button>
       <button class="tbtn s ${t.solo ? "on-s" : ""}" title="Escuchar solo esta pista">S</button>
     </li>`).join("");
@@ -843,15 +843,34 @@ function setView(v) {
   $$("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
   $("#roll").hidden = v !== "roll";
   $("#sheetWrap").hidden = v !== "sheet";
-  $("#sheetNamesBtn").hidden = v !== "sheet";
+  $("#sheetNamesBtn").hidden = $("#sheetChordsBtn").hidden = $("#sheetEasyBtn").hidden = v !== "sheet";
   if (v === "sheet") sheet.show();
 }
 
 /* =====================================================================
    Notas cayendo
    ===================================================================== */
+// Colores "#rrggbb": mezclas y transparencias, con cache (se piden en cada cuadro).
+const _rgb = {}, _mix = {};
+function hexRgb(c) {
+  if (!_rgb[c]) { const n = parseInt(c.slice(1), 16); _rgb[c] = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  return _rgb[c];
+}
+function rgba(c, a) { const [r, g, b] = hexRgb(c); return `rgba(${r},${g},${b},${a})`; }
+function mix(c, d, f) {
+  const key = `${c}${d}${f}`;
+  if (!_mix[key]) {
+    const A = hexRgb(c), B = hexRgb(d);
+    _mix[key] = "#" + A.map((v, i) => Math.round(v + (B[i] - v) * f).toString(16).padStart(2, "0")).join("");
+  }
+  return _mix[key];
+}
+
 const roll = {
   canvas: null, g: null, w: 0, h: 0, dpr: 1,
+  // Efectos: chispas cuando cada nota llega a la linea, haz de luz sobre las
+  // teclas que suenan (se apaga de a poco al soltarse) y brillo en las notas activas.
+  sparks: [], glow: new Map(), sprites: {}, prevT: 0, prevNow: 0, prevHeld: new Set(),
 
   init() {
     this.canvas = $("#roll");
@@ -908,13 +927,47 @@ const roll = {
     return { keys, ww };
   },
 
+  // Halo redondo de un color, dibujado una sola vez y reusado (mucho mas
+  // liviano que shadowBlur en cada cuadro).
+  sprite(color) {
+    let c = this.sprites[color];
+    if (c) return c;
+    c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d"), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    r.addColorStop(0, "rgba(255,255,255,0.85)");
+    r.addColorStop(0.2, rgba(color, 0.7));
+    r.addColorStop(0.55, rgba(color, 0.18));
+    r.addColorStop(1, rgba(color, 0));
+    g.fillStyle = r;
+    g.fillRect(0, 0, 64, 64);
+    return (this.sprites[color] = c);
+  },
+
+  burst(x, y, color, n, spread, power = 1) {
+    if (this.sparks.length > 600) return;
+    const light = mix(color, "#ffffff", 0.55);
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.5;
+      const v = (90 + Math.random() * 230) * power;
+      this.sparks.push({
+        x: x + (Math.random() - 0.5) * spread, y: y - 1,
+        vx: Math.cos(a) * v * 0.7, vy: Math.sin(a) * v,
+        life: 0, max: 0.3 + Math.random() * 0.45, r: 0.7 + Math.random() * 1.5,
+        color: Math.random() < 0.6 ? light : color,
+      });
+    }
+  },
+
   draw() {
     if (!player.data || player.view !== "roll" || $("#player").hidden) return;
     const g = this.g, W = this.w, H = this.h;
     if (!W || !H) return;
+    const now = performance.now();
+    const dt = Math.min(0.05, Math.max(0, (now - this.prevNow) / 1000));
+    this.prevNow = now;
+    const fx = $("#optFx").checked;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    g.fillStyle = "#0a0d13";
-    g.fillRect(0, 0, W, H);
 
     const t = engine.time();
     const pps = +$("#zoom").value;
@@ -924,25 +977,34 @@ const roll = {
     const tTop = t + hit / pps;
     const latin = $("#optLatin").checked, names = $("#optNames").checked;
     const fifths = player.keyNow().fifths;
+    // Solo hay chispas si el tiempo avanzo normalmente (no al saltar o arrastrar).
+    const flowing = engine.playing && t > this.prevT && t - this.prevT < 0.3;
+
+    // Fondo: oscuro arriba, apenas mas claro cerca de la linea de golpe.
+    const bg = g.createLinearGradient(0, 0, 0, hit);
+    bg.addColorStop(0, "#06070b");
+    bg.addColorStop(1, "#10141f");
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
 
     // Carriles: una linea tenue en cada Do y fondo algo mas claro en las negras.
     for (const [p, k] of Object.entries(keys)) {
       if (k.black) { g.fillStyle = "rgba(255,255,255,0.018)"; g.fillRect(k.x, 0, k.w, hit); }
-      if (+p % 12 === 0) { g.fillStyle = "rgba(255,255,255,0.07)"; g.fillRect(k.x, 0, 1, hit); }
+      if (+p % 12 === 0) { g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(k.x, 0, 1, hit); }
     }
 
     // Pulsos y compases.
     const beats = player.data.beats;
     const shift = player.barShift(), bpb = player.data.beats_per_bar;
-    g.font = "11px system-ui";
+    g.font = "600 11px system-ui";
     for (let i = lowerBound(beats, t, x => x); i < beats.length && beats[i] <= tTop; i++) {
       const y = hit - (beats[i] - t) * pps;
       const isDown = player.downSet.has(i);
-      g.fillStyle = isDown ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.045)";
+      g.fillStyle = isDown ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.04)";
       g.fillRect(0, y, W, 1);
       if (isDown) {
-        g.fillStyle = "rgba(255,255,255,0.35)";
-        g.fillText(String(Math.floor((i + shift) / bpb) + 1), 4, y - 3);
+        g.fillStyle = "rgba(255,255,255,0.3)";
+        g.fillText(String(Math.floor((i + shift) / bpb) + 1), 6, y - 4);
       }
     }
 
@@ -964,6 +1026,9 @@ const roll = {
         const y1 = hit - (s - t) * pps, y0 = hit - (e - t) * pps;
         const on = s <= t && t < e;
         if (on) active[p] = tr.color;
+        if (fx && flowing && !dim && s > this.prevT && s <= t) {
+          this.burst(k.x + k.w / 2, hit, tr.color, k.black ? 8 : 12, k.w * 0.6);
+        }
         const top = Math.max(0, y0), bot = Math.min(hit, y1);
         if (bot - top < 1) continue;
         items.push({ k, p, top, bot, on, dim, color: tr.color, clipped: y0 < 0 });
@@ -978,20 +1043,36 @@ const roll = {
       const y = it.clipped ? it.top : it.top + 2;
       const h = it.bot - y;
       if (h < 1) continue;
-      const r = Math.min(4, w / 3);
-      g.globalAlpha = it.dim ? 0.4 : 1;
-      if (it.on) { g.shadowColor = it.color; g.shadowBlur = 12; }
-      g.fillStyle = it.color;
+      const r = Math.min(5, w / 3);
+      g.globalAlpha = it.dim ? 0.35 : 1;
+      if (fx && it.on && !it.dim) {
+        // Halo alrededor de la nota que esta sonando.
+        g.globalCompositeOperation = "lighter";
+        g.globalAlpha = 0.5;
+        g.drawImage(this.sprite(it.color), x - w * 0.9, y - 14, w * 2.8, h + 28);
+        g.globalCompositeOperation = "source-over";
+        g.globalAlpha = 1;
+      }
+      // Relleno con volumen: borde izquierdo claro, derecho oscuro.
+      let base = k.black ? mix(it.color, "#000000", 0.22) : it.color;
+      if (it.on) base = mix(base, "#ffffff", 0.22);
+      const gr = g.createLinearGradient(x, 0, x + w, 0);
+      gr.addColorStop(0, mix(base, "#ffffff", 0.3));
+      gr.addColorStop(0.4, base);
+      gr.addColorStop(1, mix(base, "#000000", 0.32));
+      g.fillStyle = gr;
       roundRect(g, x, y, w, h, r);
       g.fill();
-      g.shadowBlur = 0;
-      if (k.black) { g.fillStyle = "rgba(0,0,0,0.3)"; g.fill(); }
-      g.lineWidth = it.on ? 2 : 1.5;
-      g.strokeStyle = it.on ? "rgba(255,255,255,0.9)" : "rgba(6,8,12,0.95)";
+      g.lineWidth = it.on ? 1.5 : 1.25;
+      g.strokeStyle = it.on ? "rgba(255,255,255,0.85)" : "rgba(4,6,10,0.9)";
       g.stroke();
+      if (!it.clipped && h > 6 && w > 6) {
+        g.fillStyle = "rgba(255,255,255,0.35)";
+        g.fillRect(x + r, y + 1.5, w - r * 2, 1);
+      }
       if (names && h > 16 && w > 11) {
         g.fillStyle = k.black ? "rgba(255,255,255,0.92)" : "rgba(10,13,19,0.85)";
-        g.font = `600 ${k.black ? fs * 0.85 : fs}px system-ui`;
+        g.font = `700 ${k.black ? fs * 0.85 : fs}px system-ui`;
         g.textAlign = "center";
         g.fillText(noteName(it.p, fifths, latin), x + w / 2, it.bot - 5);
         g.textAlign = "left";
@@ -999,35 +1080,119 @@ const roll = {
       g.globalAlpha = 1;
     }
 
+    // Luz de cada tecla: prendida mientras suena, se apaga suave al soltarse.
+    for (const [p, c] of Object.entries(active)) this.glow.set(+p, { c, a: 1 });
+    for (const [p, gl] of this.glow) {
+      if (active[p]) continue;
+      gl.a -= dt * 4;
+      if (gl.a <= 0) this.glow.delete(p);
+    }
+
+    if (fx) {
+      g.globalCompositeOperation = "lighter";
+      const bh = Math.min(hit, 150);
+      for (const [p, gl] of this.glow) {
+        const k = keys[p];
+        if (!k) continue;
+        // Haz de luz que sube desde la tecla.
+        const beam = g.createLinearGradient(0, hit - bh, 0, hit);
+        beam.addColorStop(0, rgba(gl.c, 0));
+        beam.addColorStop(1, rgba(gl.c, 0.3 * gl.a));
+        g.fillStyle = beam;
+        g.fillRect(k.x, hit - bh, k.w, bh);
+        // Destello en el punto de golpe.
+        const s = Math.max(ww * 3.4, 44);
+        g.globalAlpha = gl.a;
+        g.drawImage(this.sprite(gl.c), k.x + k.w / 2 - s / 2, hit - s / 2, s, s);
+        g.globalAlpha = 1;
+        // Chisporroteo suave mientras la nota sigue sonando.
+        if (flowing && active[p] && Math.random() < dt * 10) this.burst(k.x + k.w / 2, hit, gl.c, 1, k.w * 0.7, 0.6);
+      }
+      g.globalCompositeOperation = "source-over";
+    }
+
     // Linea de golpe (en practica, ambar mientras espera que toques).
-    g.fillStyle = practice.waiting ? "rgba(242,181,68,0.95)" : "rgba(108,140,255,0.8)";
+    const lc = practice.waiting ? "#f2b544" : "#7b8cff";
+    if (fx) {
+      g.globalCompositeOperation = "lighter";
+      const band = g.createLinearGradient(0, hit - 26, 0, hit);
+      band.addColorStop(0, rgba(lc, 0));
+      band.addColorStop(1, rgba(lc, practice.waiting ? 0.3 : 0.2));
+      g.fillStyle = band;
+      g.fillRect(0, hit - 26, W, 26);
+      g.globalCompositeOperation = "source-over";
+    }
+    g.fillStyle = lc;
     g.fillRect(0, hit - 2, W, practice.waiting ? 3 : 2);
+    g.fillStyle = "rgba(255,255,255,0.55)";
+    g.fillRect(0, hit - 1.5, W, 1);
 
     // Teclado. En practica: lo que tocas en verde, un error en rojo y las
     // teclas que se esperan con un recuadro que titila.
-    const now = performance.now();
-    const keyFill = (p, base) => {
-      if (practice.flash.has(p) && practice.flash.get(p) > now) return "#ff5d73";
-      if (practice.held.has(p)) return "#43d17a";
-      return active[p] || base;
+    const tint = p => {
+      if (practice.flash.has(p) && practice.flash.get(p) > now) return { c: "#ff5d73", a: 1 };
+      if (practice.held.has(p)) return { c: "#43d17a", a: 1 };
+      return this.glow.get(p);
     };
+    const white = g.createLinearGradient(0, hit, 0, H);
+    white.addColorStop(0, "#d4d8e0");
+    white.addColorStop(0.08, "#f6f7fa");
+    white.addColorStop(0.85, "#eceef3");
+    white.addColorStop(1, "#c3c8d2");
+    const bkH = kbH * 0.62;
+    const black = g.createLinearGradient(0, hit, 0, hit + bkH);
+    black.addColorStop(0, "#1a1d24");
+    black.addColorStop(0.75, "#2b303b");
+    black.addColorStop(0.9, "#3a404c");
+    black.addColorStop(1, "#14161b");
+    g.fillStyle = "#05060a";
+    g.fillRect(0, hit, W, kbH);
     for (const [p, k] of Object.entries(keys)) {
       if (k.black) continue;
-      g.fillStyle = keyFill(+p, "#eef0f4");
-      g.fillRect(k.x + 0.5, hit, k.w - 1, kbH);
+      roundRect(g, k.x + 0.5, hit, k.w - 1, kbH - 1, Math.min(4, k.w / 4));
+      g.fillStyle = white;
+      g.fill();
+      const tn = tint(+p);
+      if (tn) {
+        const pg = g.createLinearGradient(0, hit, 0, H);
+        pg.addColorStop(0, mix(tn.c, "#000000", 0.25));
+        pg.addColorStop(0.25, tn.c);
+        pg.addColorStop(1, mix(tn.c, "#ffffff", 0.35));
+        g.globalAlpha = tn.a;
+        g.fillStyle = pg;
+        g.fill();
+        g.globalAlpha = 1;
+      }
       if (+p % 12 === 0 && k.w > 14) {
-        g.fillStyle = active[p] ? "#fff" : "#8a93a6";
-        g.font = "10px system-ui";
+        g.fillStyle = tn && tn.a > 0.5 ? "#fff" : "#8a93a6";
+        g.font = "600 10px system-ui";
         g.textAlign = "center";
-        g.fillText(noteName(+p, 0, latin, true), k.x + k.w / 2, H - 6);
+        g.fillText(noteName(+p, 0, latin, true), k.x + k.w / 2, H - 7);
         g.textAlign = "left";
       }
     }
     for (const [p, k] of Object.entries(keys)) {
       if (!k.black) continue;
-      g.fillStyle = keyFill(+p, "#1b1f27");
-      g.fillRect(k.x, hit, k.w, kbH * 0.62);
+      roundRect(g, k.x, hit - 1, k.w, bkH, Math.min(3, k.w / 4));
+      g.fillStyle = black;
+      g.fill();
+      const tn = tint(+p);
+      if (tn) {
+        g.globalAlpha = tn.a;
+        g.fillStyle = mix(tn.c, "#000000", 0.15);
+        g.fill();
+        g.globalAlpha = 1;
+      }
+      g.fillStyle = "rgba(255,255,255,0.07)";
+      g.fillRect(k.x + k.w * 0.2, hit + 2, k.w * 0.14, bkH * 0.72);
     }
+    // Sombra de la linea de golpe sobre las teclas.
+    const sh = g.createLinearGradient(0, hit, 0, hit + 10);
+    sh.addColorStop(0, "rgba(0,0,0,0.5)");
+    sh.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = sh;
+    g.fillRect(0, hit, W, 10);
+
     if (practice.waiting) {
       const pulse = 0.55 + 0.45 * Math.sin(now / 160);
       g.lineWidth = 3;
@@ -1035,11 +1200,58 @@ const roll = {
         const k = keys[p];
         if (!k) continue;
         g.strokeStyle = practice.got.has(p) ? "rgba(67,209,122,0.95)" : `rgba(242,181,68,${pulse})`;
-        g.strokeRect(k.x + 2, hit + 2, k.w - 4, (k.black ? kbH * 0.62 : kbH) - 4);
+        g.strokeRect(k.x + 2, hit + 2, k.w - 4, (k.black ? bkH : kbH) - 4);
       }
     }
+
+    // Practica: cada tecla que tocas larga chispas verdes.
+    if (fx && practice.on) {
+      for (const p of practice.held.keys()) {
+        const k = keys[p];
+        if (k && !this.prevHeld.has(p)) this.burst(k.x + k.w / 2, hit, "#43d17a", 14, k.w * 0.6, 1.1);
+      }
+    }
+    this.prevHeld = new Set(practice.held.keys());
+
+    // Chispas: suben, la gravedad las frena y se apagan al caer sobre el teclado.
+    const sp = this.sparks;
+    if (sp.length) {
+      g.globalCompositeOperation = "lighter";
+      for (let i = sp.length - 1; i >= 0; i--) {
+        const s = sp[i];
+        s.life += dt;
+        s.vy += 620 * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        if (s.life >= s.max || (s.vy > 0 && s.y > hit + 4)) { sp[i] = sp[sp.length - 1]; sp.pop(); continue; }
+        const a = 1 - s.life / s.max;
+        g.globalAlpha = a;
+        g.fillStyle = s.color;
+        g.beginPath();
+        g.arc(s.x, s.y, s.r * (0.6 + a * 0.4), 0, Math.PI * 2);
+        g.fill();
+      }
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = "source-over";
+    }
+    if (!fx) sp.length = 0;
+    this.prevT = t;
   },
 };
+
+// Cifrado en Do-Re-Mi (Lam, Sol, Si♭): OSMD solo escribe la raiz en letras,
+// asi que se traduce al dibujar. El archivo MusicXML queda con el cifrado estandar.
+function latinChords() {
+  const CS = window.opensheetmusicdisplay && opensheetmusicdisplay.ChordSymbolContainer;
+  if (!CS || CS.latinPatched) return;
+  const calc = CS.calculateChordText;
+  CS.calculateChordText = function (...args) {
+    const s = calc.apply(this, args);
+    return $("#optLatin").checked ? s.replace(/^[A-G]/, c => LATIN[c]) : s;
+  };
+  CS.latinPatched = true;
+}
+latinChords();
 
 function roundRect(g, x, y, w, h, r) {
   r = Math.max(0, Math.min(r, h / 2, w / 2));
@@ -1066,7 +1278,8 @@ const sheet = {
   },
 
   url() {
-    return JSON.stringify([player.id, player.transpose, player.visibleIds(), player.data.settings, this.names()]);
+    return JSON.stringify([player.id, player.transpose, player.visibleIds(), player.data.settings, this.names(),
+      $("#optChords").checked, $("#optEasy").checked, $("#optLatin").checked]);
   },
 
   xml() {
@@ -1075,6 +1288,8 @@ const sheet = {
       transpose: player.transpose,
       trackIds: ids.length !== player.allIds().length ? ids : null,
       names: this.names(),
+      chords: $("#optChords").checked,
+      easy: $("#optEasy").checked,
     });
   },
 
@@ -1088,12 +1303,14 @@ const sheet = {
     try {
       if (!player.visibleIds().length) throw new Error("No hay pistas visibles con notas para mostrar.");
       const xml = this.xml();
+      latinChords();
       if (!this.osmd) {
         this.osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(div, {
           autoResize: true, backend: "svg", drawTitle: true, drawSubtitle: false, drawComposer: false,
           drawPartNames: true, followCursor: true, drawingParameters: "default", autoBeam: true,
         });
       }
+      this.osmd.EngravingRules.ChordSymbolTextHeight = 2.4;
       await this.osmd.load(xml);
       msg.textContent = "Dibujando…";
       await new Promise(r2 => setTimeout(r2, 20));
@@ -1449,7 +1666,7 @@ const practice = {
    ===================================================================== */
 const ui = {
   onPlayState(p) {
-    $("#playBtn").textContent = p ? "❚❚" : "▶";
+    $("#playBtn").innerHTML = p ? '<svg class="ic fill"><use href="#i-pause"/></svg>' : '<svg class="ic fill play-ic"><use href="#i-play"/></svg>';
     this.practiceStatus();
   },
 
@@ -1573,18 +1790,18 @@ function initPlayer() {
     const L = player.loop, btn = e.currentTarget;
     if (L.stage === 0) {
       L.a = engine.time(); L.b = null; L.stage = 1;
-      btn.classList.add("on"); btn.textContent = "🔁 Marcar fin";
+      btn.classList.add("on"); $("span", btn).textContent = "Marcar fin";
       toast("Inicio del bucle marcado. Tocá de nuevo para marcar el final.");
     } else if (L.stage === 1) {
       let b = engine.time();
       if (b < L.a) [L.a, b] = [b, L.a];
       if (b - L.a < 0.3) b = L.a + 2;
       L.b = b; L.stage = 2;
-      btn.textContent = "🔁 Quitar bucle";
+      $("span", btn).textContent = "Quitar bucle";
       engine.seek(L.a);
     } else {
       L.a = L.b = null; L.stage = 0;
-      btn.classList.remove("on"); btn.textContent = "🔁 Bucle";
+      btn.classList.remove("on"); $("span", btn).textContent = "Bucle";
     }
   };
 
@@ -1649,11 +1866,14 @@ function initPlayer() {
     try {
       localStorage.setItem("sheetNames", $("#optSheetNames").checked ? "1" : "0");
       localStorage.setItem("latin", $("#optLatin").checked ? "1" : "0");
+      localStorage.setItem("fx", $("#optFx").checked ? "1" : "0");
     } catch { /* sin almacenamiento local */ }
   };
+  $("#optFx").onchange = remember;
   try {
     if (localStorage.getItem("sheetNames") === "1") $("#optSheetNames").checked = true;
     if (localStorage.getItem("latin") === "0") $("#optLatin").checked = false;
+    if (localStorage.getItem("fx") === "0") $("#optFx").checked = false;
   } catch { /* sin almacenamiento local */ }
   syncNamesBtn();
   $("#optSheetNames").onchange = () => { remember(); refreshSheet(); };
@@ -1665,8 +1885,21 @@ function initPlayer() {
   $("#optLatin").onchange = () => {
     remember();
     renderChips();
-    if ($("#optSheetNames").checked) refreshSheet();
+    if ($("#optSheetNames").checked || $("#optChords").checked || $("#optEasy").checked) refreshSheet();
   };
+  // Acordes y partitura facil: en el panel y como botones arriba de la partitura.
+  for (const [opt, btn, key] of [["optChords", "sheetChordsBtn", "chords"], ["optEasy", "sheetEasyBtn", "easy"]]) {
+    try { const v = localStorage.getItem(key); if (v != null) $("#" + opt).checked = v === "1"; } catch { /* nada */ }
+    const sync = () => $("#" + btn).classList.toggle("on", $("#" + opt).checked);
+    const changed = () => {
+      sync();
+      try { localStorage.setItem(key, $("#" + opt).checked ? "1" : "0"); } catch { /* nada */ }
+      if (player.view === "sheet") sheet.show();
+    };
+    $("#" + opt).addEventListener("change", changed);
+    $("#" + btn).onclick = () => { $("#" + opt).checked = !$("#" + opt).checked; changed(); };
+    sync();
+  }
 
   const setRhythm = async (body) => {
     try {
