@@ -326,7 +326,7 @@ export function buildMusicXml(data, { transpose = 0, trackIds = null, names = nu
       const num = lead ? mi : mi + 1;
       body += `<measure number="${num}"${lead && mi === 0 ? ' implicit="yes"' : ""}>`;
       if (mi === 0) {
-        body += `<attributes><divisions>${Q}</divisions><key><fifths>${fifths}</fifths></key>` +
+        body += `<attributes><divisions>${Q}</divisions><key><fifths>${fifths}</fifths><mode>${data.key.mode === "minor" ? "minor" : "major"}</mode></key>` +
           `<time><beats>${bpb}</beats><beat-type>4</beat-type></time>` +
           (staves.length > 1 ? `<staves>${staves.length}</staves>` : "") +
           staves.map((s, i) => clefXml(s.clef, staves.length > 1 ? i + 1 : 0)).join("") + `</attributes>`;

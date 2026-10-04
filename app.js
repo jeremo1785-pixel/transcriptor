@@ -1,6 +1,7 @@
 import { store } from "./js/store.js";
 import { applyRhythm, assignHands } from "./js/analysis.js";
 import { buildMusicXml, buildMidi } from "./js/notation.js";
+import { importScore, silentWav } from "./js/scoreimport.js";
 
 /* =====================================================================
    Utilidades
@@ -87,7 +88,7 @@ function noteName(midi, fifths, latin, octave = false) {
 const MODES = [
   { id: "piano", label: "Piano solo", hint: "Grabaciones de piano o teclado. Se transcribe en el propio iPad." },
 ];
-const MODE_LABEL = { piano: "Piano solo", melodia: "Melodía", banda: "Banda completa" };
+const MODE_LABEL = { piano: "Piano solo", melodia: "Melodía", banda: "Banda completa", partitura: "Partitura" };
 
 const home = { src: "file", file: null, recBlob: null, recorder: null, modes: MODES };
 const queue = { running: false, items: [], live: {} };
@@ -103,7 +104,19 @@ async function initHome() {
     home.src = b.dataset.src;
     $$("#srcTabs button").forEach(x => x.classList.toggle("on", x === b));
     $$(".src-pane").forEach(p => (p.hidden = p.dataset.src !== home.src));
+    syncHomeMode();
   });
+
+  // Partituras: pestaña propia (y tambien se aceptan en «Archivo»).
+  const sdrop = $("#dropScore"), sinput = $("#scoreInput");
+  sinput.onchange = () => setScore(sinput.files[0]);
+  sdrop.ondragover = e => { e.preventDefault(); sdrop.classList.add("over"); };
+  sdrop.ondragleave = () => sdrop.classList.remove("over");
+  sdrop.ondrop = e => {
+    e.preventDefault();
+    sdrop.classList.remove("over");
+    if (e.dataTransfer.files[0]) setScore(e.dataTransfer.files[0]);
+  };
 
   const drop = $("#drop"), input = $("#fileInput");
   // Sin filtro de tipo: en el iPad, filtrar por "audio/*" deja los mp3 de
@@ -129,6 +142,22 @@ async function initHome() {
 function setFile(f) {
   home.file = f || null;
   $("#fileName").textContent = f ? `✓ ${f.name}` : "";
+  syncHomeMode();
+}
+
+const SCORE_RE = /\.(pdf|musicxml|xml|mxl|midi?)$/i;
+const isScoreFile = f => !!f && SCORE_RE.test(f.name);
+
+function setScore(f) {
+  home.scoreFile = f || null;
+  $("#scoreName").textContent = f ? `✓ ${f.name}` : "";
+}
+
+// Con una partitura no hay nada que elegir: se importa tal cual.
+function syncHomeMode() {
+  const score = home.src === "score" || (home.src === "file" && isScoreFile(home.file));
+  $("#modesBox").hidden = score;
+  $("#goBtn").textContent = score ? "Importar partitura" : "Transcribir";
 }
 
 async function toggleRecording() {
@@ -203,6 +232,24 @@ async function importPackage(file) {
   return meta.title;
 }
 
+// Partitura (MusicXML o MIDI): las notas vienen escritas, se guarda directo.
+// El audio es silencio del mismo largo, para que el reproductor funcione igual.
+async function importScoreFile(file) {
+  if (/\.pdf$/i.test(file.name)) {
+    throw new Error("Los PDF se leen en la PC: abrilo en el Transcriptor de la PC (pestaña Partitura) y mandalo al iPad.");
+  }
+  const d = await importScore(file);
+  const id = newId();
+  await store.putBlob(id + ":audio", silentWav(d.duration));
+  await store.putBlob(id + ":notes", d);
+  await store.put({
+    id, title: d.title, mode: "partitura", status: "ready", stage: "Listo", progress: 1,
+    created: Date.now(), duration: d.duration, key: d.key?.label, bpm: d.bpm,
+    tracks: d.tracks.map(t => ({ id: t.id, label: t.label, count: t.notes.length })),
+  });
+  return d.title;
+}
+
 async function submitNew() {
   const mode = ($("input[name=mode]:checked") || {}).value || "piano";
   const msg = $("#newMsg"), btn = $("#goBtn");
@@ -210,6 +257,17 @@ async function submitNew() {
   msg.textContent = "";
   btn.disabled = true;
   try {
+    const scoreFile = home.src === "score" ? home.scoreFile : isScoreFile(home.file) ? home.file : null;
+    if (home.src === "score" && !scoreFile) throw new Error("Elegí una partitura primero");
+    if (scoreFile) {
+      const t = await importScoreFile(scoreFile);
+      setFile(null);
+      setScore(null);
+      $("#fileInput").value = $("#scoreInput").value = "";
+      msg.textContent = `«${t}» importada. Ya está en la lista.`;
+      refreshJobs();
+      return;
+    }
     let blob = home.file, title = "";
     if (home.src === "mic") {
       if (!home.recBlob) throw new Error("Grabá algo primero");
@@ -749,7 +807,10 @@ async function openSong(id) {
   if (player.audioUrl) URL.revokeObjectURL(player.audioUrl);
   player.audioUrl = URL.createObjectURL(audio);
   engine.load(player.audioUrl);
-  engine.setMix(+$("#mix").value);
+  // Partitura importada: el audio es silencio, lo que suena son las notas.
+  const fromScore = data.source === "partitura";
+  $(".ctl.mix").hidden = fromScore;
+  engine.setMix(fromScore ? 100 : +$("#mix").value);
   engine.setSpeed(+$("#speedSel").value);
   $("#tEnd").textContent = fmtTime(data.duration);
   sheet.invalidate();
@@ -807,6 +868,7 @@ function renderChips() {
     `<b>${Math.round(d.bpm)}</b> BPM`,
     `Compás <b>${d.beats_per_bar}/4</b>`,
   ];
+  if (d.source === "partitura") chips.unshift(`<b>Partitura</b> importada`);
   if (Math.abs(d.tuning_cents) >= 8) {
     chips.push(`Afinación <b>${d.tuning_cents > 0 ? "+" : ""}${d.tuning_cents}</b> cents <span title="La grabación no está en La 440; se corrigió al transcribir">ⓘ</span>`);
   }

@@ -34,6 +34,7 @@
     <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></symbol>
     <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
     <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
+    <symbol id="i-sheet" viewBox="0 0 24 24"><path d="M3 6h18M3 10h18M3 14h11M3 18h9"/><path d="M19 9.5v8"/><ellipse cx="16.6" cy="17.6" rx="2.6" ry="2" fill="currentColor"/></symbol>
     <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M11 18h2"/></symbol>
   </svg>
 
@@ -50,6 +51,7 @@
 
         <div class="seg" id="srcTabs" role="tablist">
           <button data-src="file" class="on"><svg class="ic"><use href="#i-folder"/></svg> Archivo</button>
+          <button data-src="score"><svg class="ic"><use href="#i-sheet"/></svg> Partitura</button>
           <button data-src="mic"><svg class="ic"><use href="#i-mic"/></svg> Grabar</button>
         </div>
 
@@ -62,6 +64,20 @@
             <span class="drop-small">o un archivo <b>.transcriptor</b> mandado desde la PC (iCloud Drive › Transcriptor)</span>
             <span class="drop-file" id="fileName"></span>
           </label>
+        </div>
+
+        <div class="src-pane" data-src="score" hidden>
+          <label class="drop" id="dropScore">
+            <span class="drop-ic"><svg class="ic"><use href="#i-sheet"/></svg></span>
+            <input type="file" id="scoreInput" class="file-input">
+            <span class="drop-big">Tocá para elegir una partitura</span>
+            <span class="drop-small">MusicXML (.musicxml, .mxl) o MIDI (.mid) · de Archivos o iCloud</span>
+            <span class="drop-file" id="scoreName"></span>
+          </label>
+          <p class="hint">Las notas se toman tal cual de la partitura, sin transcribir nada:
+            ves las notas cayendo, practicás y la escuchás con el piano de la app.
+            En MuseScore: Archivo › Exportar › MusicXML. Los <b>PDF</b> se leen en el Transcriptor
+            de la PC (pestaña Partitura) y se mandan al iPad.</p>
         </div>
 
         <div class="src-pane" data-src="mic" hidden>
@@ -77,8 +93,10 @@
         <p class="hint">La primera transcripción baja los modelos (unos 180 MB, conviene con Wi-Fi).
           Después quedan guardados en el iPad y todo funciona sin internet.</p>
 
-        <h3>¿Qué vas a transcribir?</h3>
-        <div class="modes" id="modes"></div>
+        <div id="modesBox">
+          <h3>¿Qué vas a transcribir?</h3>
+          <div class="modes" id="modes"></div>
+        </div>
 
         <div class="go-row">
           <button id="goBtn" class="primary">Transcribir</button>

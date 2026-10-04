@@ -1,12 +1,12 @@
 // Service worker: guarda la app y los modelos en el iPad para que funcione
 // sin internet despues de la primera vez.
-const VERSION = "v8";
+const VERSION = "v9";
 const SHELL = `transcriptor-app-${VERSION}`;
 const MODELS = "transcriptor-modelos-v1";   // los modelos pesados, aparte: no se rebajan en cada version
 
 const ASSETS = [
   "./", "index.html", "styles.css", "app.js", "manifest.json", "icon-192.png", "icon-512.png",
-  "js/dsp.js", "js/piano.js", "js/beats.js", "js/analysis.js", "js/notation.js", "js/store.js", "js/worker.js",
+  "js/dsp.js", "js/piano.js", "js/beats.js", "js/analysis.js", "js/notation.js", "js/store.js", "js/worker.js", "js/scoreimport.js",
   "vendor/opensheetmusicdisplay.min.js", "vendor/soundfont-player.min.js",
   "vendor/jspdf.umd.min.js", "pdfexport.js",
   "vendor/ort/ort.all.min.mjs", "vendor/ort/ort-wasm-simd-threaded.jsep.mjs", "vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
