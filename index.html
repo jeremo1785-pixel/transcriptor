@@ -32,6 +32,8 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
     <symbol id="i-restart" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
     <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2.5"/><path d="M11 18h2"/></symbol>
   </svg>
 
@@ -107,6 +109,7 @@
         <button id="sheetChordsBtn" class="toggle" hidden title="Cifrado de acordes arriba del pentagrama (Lam, Sol, Si♭…)">Acordes</button>
         <button id="sheetEasyBtn" class="toggle" hidden title="Partitura fácil: solo la melodía, con los acordes arriba">Fácil</button>
         <button id="sideBtn" class="ghost side-btn" title="Pistas y opciones"><svg class="ic"><use href="#i-sliders"/></svg> Opciones</button>
+        <button id="focusBtn" class="ghost icon-only" title="Pantalla completa, sin menús (tecla F)"><svg class="ic"><use href="#i-expand"/></svg></button>
         <div class="menu-wrap">
           <button id="exportBtn" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Exportar</button>
           <div class="menu" id="exportMenu" hidden>
@@ -121,6 +124,17 @@
 
       <div class="p-body">
         <div class="stage" id="stage">
+          <!-- Pantalla completa: controles minimos que se esconden solos. -->
+          <div class="focus-bar" id="focusBar">
+            <button id="fPlay" class="play" title="Reproducir / pausa"><svg class="ic fill play-ic"><use href="#i-play"/></svg></button>
+            <span id="fTime" class="mono">0:00</span>
+            <div class="seg small" id="fView">
+              <button data-view="roll" class="on">Notas</button>
+              <button data-view="sheet">Partitura</button>
+            </div>
+            <span id="fStatus" class="f-status"></span>
+            <button id="fExit" class="ghost" title="Salir de pantalla completa (Esc)"><svg class="ic"><use href="#i-shrink"/></svg> Salir</button>
+          </div>
           <canvas id="roll"></canvas>
           <div id="sheetWrap" hidden>
             <div id="sheetMsg" class="sheet-msg"></div>

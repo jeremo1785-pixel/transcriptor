@@ -357,6 +357,35 @@ input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(123,1
 .ghost.wide { width: 100%; }
 .practice-btn.on { border-color: rgba(67,209,122,.6); color: #b8f5cd; background: rgba(67,209,122,.13); box-shadow: 0 0 14px rgba(67,209,122,.15); }
 
+/* ---------------------------------------------------------------- pantalla completa */
+.ghost.icon-only { padding: 6px 9px; }
+.focus-bar { display: none; }
+body.focus .topbar, body.focus .p-head, body.focus .transport,
+body.focus .side { display: none !important; }
+body.focus .stage { background: #06070b; }
+body.focus .focus-bar {
+  display: flex; align-items: center; gap: 12px; position: absolute; z-index: 25;
+  top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  max-width: calc(100% - 24px); padding: 7px 10px 7px 7px; border-radius: 999px;
+  background: rgba(16, 19, 27, 0.82); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line2); box-shadow: 0 12px 34px rgba(0,0,0,.5);
+  transition: opacity .35s, transform .35s var(--ease);
+}
+.focus-bar .play { width: 38px; height: 38px; }
+.focus-bar .play .ic { width: 17px; height: 17px; }
+.focus-bar .mono { color: var(--muted); white-space: nowrap; }
+.f-status { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.f-status:empty { display: none; }
+.f-status .need { color: #ffe39a; font-weight: 700; }
+.f-status .ok { color: #43d17a; font-weight: 700; }
+.f-status .bad { color: var(--err); font-weight: 700; }
+.focus-bar .ghost { border-radius: 999px; }
+/* Sin tocar nada un rato, los controles se esconden (y el puntero tambien). */
+body.focus.idle .focus-bar { opacity: 0; transform: translate(-50%, -10px); pointer-events: none; }
+body.focus.idle { cursor: none; }
+body.focus #sheetWrap { padding-top: 56px; }
+@media (max-width: 600px) { .focus-bar .seg, .focus-bar .mono { display: none !important; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }

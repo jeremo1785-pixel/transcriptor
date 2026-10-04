@@ -1666,7 +1666,7 @@ const practice = {
    ===================================================================== */
 const ui = {
   onPlayState(p) {
-    $("#playBtn").innerHTML = p ? '<svg class="ic fill"><use href="#i-pause"/></svg>' : '<svg class="ic fill play-ic"><use href="#i-play"/></svg>';
+    $("#playBtn").innerHTML = $("#fPlay").innerHTML = p ? '<svg class="ic fill"><use href="#i-pause"/></svg>' : '<svg class="ic fill play-ic"><use href="#i-play"/></svg>';
     this.practiceStatus();
   },
 
@@ -1717,7 +1717,7 @@ const ui = {
     } else if (!engine.playing) {
       html = "Dale ▶ (o espacio) y tocá las notas cuando lleguen a la línea.";
     }
-    $("#pStatus").innerHTML = html;
+    $("#pStatus").innerHTML = $("#fStatus").innerHTML = html;
   },
 
   micLevel(db) {
@@ -1729,6 +1729,7 @@ const ui = {
     if (!player.data || $("#player").hidden) return;
     const t = engine.time(), d = player.data.duration || 1;
     $("#tNow").textContent = fmtTime(t);
+    if (focusMode.on) $("#fTime").textContent = `${fmtTime(t)} / ${fmtTime(d)}`;
     const pct = Math.min(100, (t / d) * 100);
     $("#seekFill").style.width = pct + "%";
     $("#seekHead").style.left = pct + "%";
@@ -1743,8 +1744,73 @@ const ui = {
   },
 };
 
+/* =====================================================================
+   Pantalla completa: solo las notas (o la partitura), sin menus
+   ===================================================================== */
+const focusMode = {
+  on: false, timer: null,
+
+  fsElement() { return document.fullscreenElement || document.webkitFullscreenElement; },
+
+  toggle(v = !this.on) {
+    this.on = v;
+    document.body.classList.toggle("focus", v);
+    document.body.classList.remove("idle");
+    $("#focusBtn").innerHTML = `<svg class="ic"><use href="#i-${v ? "shrink" : "expand"}"/></svg>`;
+    $("#side").classList.remove("open");
+    // Ademas se pide al navegador la pantalla completa de verdad (sin barras).
+    // En la app instalada del iPad no hace falta: ya no tiene barras.
+    const el = document.documentElement;
+    try {
+      if (v && !this.fsElement()) {
+        const r = (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+        if (r && r.catch) r.catch(() => {});
+      } else if (!v && this.fsElement()) {
+        const r = (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+        if (r && r.catch) r.catch(() => {});
+      }
+    } catch { /* el navegador no lo permite: igual quedan ocultos los menus */ }
+    this.syncView();
+    this.poke();
+    requestAnimationFrame(() => roll.resize());
+  },
+
+  // Muestra los controles y los vuelve a esconder si no se toca nada.
+  poke() {
+    if (!this.on) return;
+    document.body.classList.remove("idle");
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => document.body.classList.add("idle"), 2600);
+  },
+
+  syncView() {
+    $$("#fView button").forEach(b => b.classList.toggle("on", b.dataset.view === player.view));
+  },
+
+  init() {
+    $("#focusBtn").onclick = () => this.toggle();
+    $("#fExit").onclick = () => this.toggle(false);
+    $("#fPlay").onclick = () => engine.toggle();
+    $$("#fView button").forEach(b => (b.onclick = () => { setView(b.dataset.view); this.syncView(); }));
+    // Si se sale con Esc o el gesto del sistema, salir tambien del modo.
+    const onFs = () => { if (this.on && !this.fsElement()) this.toggle(false); };
+    document.addEventListener("fullscreenchange", onFs);
+    document.addEventListener("webkitfullscreenchange", onFs);
+    for (const ev of ["pointermove", "pointerdown", "keydown", "wheel"]) {
+      document.addEventListener(ev, () => this.poke(), { passive: true });
+    }
+    document.addEventListener("keydown", e => {
+      if ($("#player").hidden || e.target.closest("input[type=text], input[type=url], select, textarea")) return;
+      if (e.code === "Escape" && this.on) this.toggle(false);
+      // La F tambien es una tecla del piano de la compu en la practica.
+      else if (e.code === "KeyF" && !practice.on && !e.ctrlKey && !e.metaKey && !e.altKey) this.toggle();
+    });
+  },
+};
+
 function initPlayer() {
   roll.init();
+  focusMode.init();
   $("#playBtn").onclick = () => engine.toggle();
 
   const seek = $("#seek");
@@ -1965,6 +2031,7 @@ function route() {
     requestAnimationFrame(() => roll.resize());
   } else {
     engine.pause();
+    if (focusMode.on) focusMode.toggle(false);
     $("#player").hidden = true;
     $("#home").hidden = false;
     refreshJobs();
