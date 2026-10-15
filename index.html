@@ -113,6 +113,8 @@
 
     <!-- ============================================================ REPRODUCTOR -->
     <section id="player" class="view" hidden>
+      <!-- Pantalla de practica simple (estilo Artie): a la vista solo lo que se
+           usa siempre; el resto esta en «Más» (panel lateral). -->
       <div class="p-head">
         <a href="#/" class="back" title="Volver a la biblioteca"><svg class="ic"><use href="#i-back"/></svg></a>
         <div class="p-title">
@@ -123,21 +125,11 @@
           <button data-view="roll" class="on">Notas</button>
           <button data-view="sheet">Partitura</button>
         </div>
-        <button id="sheetNamesBtn" class="toggle" hidden title="Escribir el nombre de cada nota debajo del pentagrama">Aa Nombres</button>
+        <button id="sheetNamesBtn" class="toggle" hidden title="Escribir el nombre de cada nota debajo del pentagrama">Aa</button>
         <button id="sheetChordsBtn" class="toggle" hidden title="Cifrado de acordes arriba del pentagrama (Lam, Sol, Si♭…)">Acordes</button>
         <button id="sheetEasyBtn" class="toggle" hidden title="Partitura fácil: solo la melodía, con los acordes arriba">Fácil</button>
-        <button id="sideBtn" class="ghost side-btn" title="Pistas y opciones"><svg class="ic"><use href="#i-sliders"/></svg> Opciones</button>
         <button id="focusBtn" class="ghost icon-only" title="Pantalla completa, sin menús (tecla F)"><svg class="ic"><use href="#i-expand"/></svg></button>
-        <div class="menu-wrap">
-          <button id="exportBtn" class="ghost"><svg class="ic"><use href="#i-download"/></svg> Exportar</button>
-          <div class="menu" id="exportMenu" hidden>
-            <button data-exp="pdf">Partitura en PDF <small>Para imprimir o mandar. Sale igual que la vista de partitura</small></button>
-            <button data-exp="xml">Partitura MusicXML <small>MuseScore, Sibelius, Finale, Dorico, Logic</small></button>
-            <button data-exp="midi">MIDI alineado al compás <small>Para DAW y editores de partituras</small></button>
-            <button data-exp="midiraw">MIDI con los tiempos reales <small>Sigue exactamente la grabación</small></button>
-            <p class="menu-note">Se exportan las pistas visibles, con la transposición actual (para un instrumento solo, ocultá las demás con el ojo). En el iPad se abre «Compartir»: Guardar en Archivos, MuseScore, AirDrop…</p>
-          </div>
-        </div>
+        <button id="sideBtn" class="ghost" title="Más opciones: sonido, vista, partitura, exportar…"><svg class="ic"><use href="#i-sliders"/></svg> Más</button>
       </div>
 
       <div class="p-body">
@@ -153,6 +145,15 @@
             <span id="fStatus" class="f-status"></span>
             <button id="fExit" class="ghost" title="Salir de pantalla completa (Esc)"><svg class="ic"><use href="#i-shrink"/></svg> Salir</button>
           </div>
+          <!-- Practica: lo que hay que tocar y como vas, arriba de las notas. -->
+          <div class="hud" id="hud" hidden>
+            <div id="pStatus" class="p-status"></div>
+            <div class="hud-score">
+              <span><b id="pHits">0</b> aciertos</span>
+              <span><b id="pMiss">0</b> errores</span>
+              <span><b id="pPct">–</b></span>
+            </div>
+          </div>
           <canvas id="roll"></canvas>
           <div id="sheetWrap" hidden>
             <div id="sheetMsg" class="sheet-msg"></div>
@@ -164,17 +165,20 @@
             <button id="pgNext" title="Página siguiente"><svg class="ic flip"><use href="#i-back"/></svg></button>
           </div>
           <div id="transposeNote" class="float-note" hidden>
-            La grabación original no se transpone: bajá «Original» en la mezcla para
-            escuchar solo las notas en el tono nuevo.
+            La grabación original no se transpone: en «Más › Sonido» bajá «Original»
+            para escuchar solo las notas en el tono nuevo.
           </div>
         </div>
 
         <aside class="side" id="side">
-          <section id="practicePanel" class="practice" hidden>
-            <div class="p-top">
-              <h4><svg class="ic"><use href="#i-piano"/></svg> Práctica</h4>
-              <button class="icon" id="pClose" title="Salir de la práctica"><svg class="ic"><use href="#i-x"/></svg></button>
-            </div>
+          <div class="side-head">
+            <h3>Más opciones</h3>
+            <button class="icon" id="sideClose" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+          </div>
+
+          <section id="practicePanel" class="practice">
+            <h4><svg class="ic"><use href="#i-piano"/></svg> Práctica</h4>
+            <div class="p-label">Tu teclado</div>
             <div class="seg small wide" id="pSrc">
               <button data-src="midi" class="on">Teclado MIDI</button>
               <button data-src="mic">Micrófono</button>
@@ -190,17 +194,49 @@
             <label class="check"><input type="checkbox" id="pWait" checked> Esperar a que toque la nota</label>
             <label class="check"><input type="checkbox" id="pHear"> Escuchar también mi parte</label>
             <label class="check" id="pEchoRow"><input type="checkbox" id="pEcho"> Sonar lo que toco <small>(teclados sin parlante)</small></label>
-            <div class="score">
-              <div><b id="pHits">0</b><span>aciertos</span></div>
-              <div><b id="pMiss">0</b><span>errores</span></div>
-              <div><b id="pPct">–</b><span>precisión</span></div>
-            </div>
-            <div id="pStatus" class="p-status"></div>
             <button class="ghost wide" id="pRestart"><svg class="ic"><use href="#i-restart"/></svg> Empezar de nuevo</button>
+            <button class="ghost wide" id="pClose" hidden><svg class="ic"><use href="#i-x"/></svg> Dejar de practicar</button>
           </section>
 
-          <h4>Pistas</h4>
-          <ul id="tracks" class="tracks"></ul>
+          <h4>Sonido</h4>
+          <div class="field mix-field ctl mix">
+            <span>Original</span>
+            <input type="range" id="mix" min="0" max="100" value="50" title="Mezcla entre la grabación y las notas transcriptas">
+            <span>Notas</span>
+          </div>
+          <div class="field">
+            <span>Tono</span>
+            <div class="stepper">
+              <button class="mini" id="trDown" title="Bajar medio tono">−</button>
+              <span id="trVal" class="mono tr-val">0</span>
+              <button class="mini" id="trUp" title="Subir medio tono">+</button>
+            </div>
+          </div>
+          <div class="field">
+            <span>Metrónomo</span>
+            <button id="metroBtn" class="toggle" title="Metrónomo"><svg class="ic"><use href="#i-metro"/></svg> <span>Apagado</span></button>
+          </div>
+          <div class="field">
+            <span>Sonido de las notas</span>
+            <div class="seg small" id="soundSeg">
+              <button data-s="piano" class="on">Piano</button>
+              <button data-s="inst">Cada instr.</button>
+            </div>
+          </div>
+          <p class="hint small" id="sfStatus"></p>
+
+          <h4>Vista</h4>
+          <label class="check"><input type="checkbox" id="optNames" checked> Nombres en las notas que caen</label>
+          <label class="check"><input type="checkbox" id="optLatin" checked> Do-Re-Mi (en vez de C-D-E)</label>
+          <label class="check"><input type="checkbox" id="optFx" checked> Efectos de luz y chispas</label>
+          <label class="check"><input type="checkbox" id="optFull"> Teclado completo (88 teclas)</label>
+          <div class="field"><span>Velocidad de caída</span>
+            <input type="range" id="zoom" min="60" max="400" value="170"></div>
+
+          <h4>Partitura</h4>
+          <label class="check"><input type="checkbox" id="optSheetNames"> Nombres de las notas</label>
+          <label class="check"><input type="checkbox" id="optChords" checked> Acordes arriba</label>
+          <label class="check"><input type="checkbox" id="optEasy"> Partitura fácil <small>(melodía + acordes)</small></label>
 
           <h4>Ritmo</h4>
           <div class="field">
@@ -221,59 +257,58 @@
           <p class="hint small">Si la partitura sale con el doble de compases (o notas muy
             largas), probá «½» o «×2».</p>
 
-          <h4>Vista</h4>
-          <label class="check"><input type="checkbox" id="optNames" checked> Nombres en las notas que caen</label>
-          <label class="check"><input type="checkbox" id="optSheetNames"> Nombres en la partitura</label>
-          <label class="check"><input type="checkbox" id="optChords" checked> Acordes arriba de la partitura</label>
-          <label class="check"><input type="checkbox" id="optEasy"> Partitura fácil <small>(melodía + acordes)</small></label>
-          <label class="check"><input type="checkbox" id="optLatin" checked> Do-Re-Mi (en vez de C-D-E)</label>
-          <label class="check"><input type="checkbox" id="optFull"> Teclado completo (88 teclas)</label>
-          <label class="check"><input type="checkbox" id="optFx" checked> Efectos de luz y chispas</label>
-          <div class="field"><span>Velocidad de caída</span>
-            <input type="range" id="zoom" min="60" max="400" value="170"></div>
+          <h4>Pistas</h4>
+          <ul id="tracks" class="tracks"></ul>
 
-          <h4>Sonido de las notas</h4>
-          <div class="seg small" id="soundSeg">
-            <button data-s="piano" class="on">Piano</button>
-            <button data-s="inst">Cada instrumento</button>
+          <h4>Exportar</h4>
+          <div class="exp-list" id="exportMenu">
+            <button data-exp="pdf">Partitura en PDF <small>Para imprimir o mandar</small></button>
+            <button data-exp="xml">Partitura MusicXML <small>MuseScore, Sibelius, Finale…</small></button>
+            <button data-exp="midi">MIDI alineado al compás <small>Para editores y DAW</small></button>
+            <button data-exp="midiraw">MIDI con los tiempos reales <small>Sigue la grabación</small></button>
+            
+            <p class="menu-note">Se exportan las pistas visibles, con la transposición actual. Se abre «Compartir»: Guardar en Archivos, MuseScore, AirDrop…</p>
           </div>
-          <p class="hint small" id="sfStatus"></p>
         </aside>
       </div>
 
       <div class="transport">
         <button id="playBtn" class="play" title="Reproducir / pausa (espacio)"><svg class="ic fill play-ic"><use href="#i-play"/></svg></button>
-        <span id="tNow" class="mono">0:00</span>
-        <div class="seek" id="seek">
-          <div class="seek-loop" id="seekLoop" hidden></div>
-          <div class="seek-fill" id="seekFill"></div>
-          <div class="seek-head" id="seekHead"></div>
+        <div class="t-seek">
+          <span id="tNow" class="mono">0:00</span>
+          <div class="seek" id="seek">
+            <div class="seek-loop" id="seekLoop" hidden></div>
+            <div class="seek-fill" id="seekFill"></div>
+            <div class="seek-head" id="seekHead"></div>
+          </div>
+          <span id="tEnd" class="mono">0:00</span>
+          <button id="loopBtn" class="toggle loop-btn" title="Bucle: tocá una vez para marcar el inicio y otra para el final"><svg class="ic"><use href="#i-loop"/></svg> <span>Bucle</span></button>
         </div>
-        <span id="tEnd" class="mono">0:00</span>
-
-        <div class="ctl">
-          <label>Velocidad</label>
-          <select id="speedSel">
-            <option value="0.5">50%</option><option value="0.6">60%</option>
-            <option value="0.7">70%</option><option value="0.8">80%</option>
-            <option value="0.9">90%</option><option value="1" selected>100%</option>
-            <option value="1.1">110%</option><option value="1.25">125%</option>
-          </select>
+        <div class="t-main">
+          <div class="t-group" id="handsBox">
+            <span class="t-label">Manos</span>
+            <div class="seg" id="handSeg">
+              <button data-h="0">Izq.</button>
+              <button data-h="both" class="on">Ambas</button>
+              <button data-h="1">Der.</button>
+            </div>
+          </div>
+          <div class="t-group">
+            <span class="t-label">Velocidad</span>
+            <div class="stepper big">
+              <button class="mini" id="spDown" title="Más lento">−</button>
+              <span id="spVal" class="mono">100%</span>
+              <button class="mini" id="spUp" title="Más rápido">+</button>
+            </div>
+            <select id="speedSel" hidden>
+              <option value="0.4">40%</option><option value="0.5">50%</option><option value="0.6">60%</option>
+              <option value="0.7">70%</option><option value="0.8">80%</option>
+              <option value="0.9">90%</option><option value="1" selected>100%</option>
+              <option value="1.1">110%</option><option value="1.25">125%</option>
+            </select>
+          </div>
+          <button id="practiceBtn" class="practice-btn" title="Practicar con tu piano: la música espera a que toques cada nota"><svg class="ic"><use href="#i-piano"/></svg> Practicar</button>
         </div>
-        <div class="ctl mix">
-          <label>Original</label>
-          <input type="range" id="mix" min="0" max="100" value="50" title="Mezcla entre la grabación y las notas transcriptas">
-          <label>Notas</label>
-        </div>
-        <div class="ctl">
-          <label>Tono</label>
-          <button class="mini" id="trDown" title="Bajar medio tono">−</button>
-          <span id="trVal" class="mono tr-val">0</span>
-          <button class="mini" id="trUp" title="Subir medio tono">+</button>
-        </div>
-        <button id="metroBtn" class="toggle" title="Metrónomo"><svg class="ic"><use href="#i-metro"/></svg> Metrónomo</button>
-        <button id="loopBtn" class="toggle" title="Bucle A-B"><svg class="ic"><use href="#i-loop"/></svg> <span>Bucle</span></button>
-        <button id="practiceBtn" class="toggle practice-btn" title="Practicar con tu piano"><svg class="ic"><use href="#i-piano"/></svg> Practicar</button>
       </div>
     </section>
   </main>

@@ -806,6 +806,8 @@ async function openSong(id) {
   setData(data);
   player.tracks = buildTracks(data.tracks);
   renderTracks();
+  syncHands();
+  syncSpeed();
   player.computeRange();
   if (player.audioUrl) URL.revokeObjectURL(player.audioUrl);
   player.audioUrl = URL.createObjectURL(audio);
@@ -876,6 +878,26 @@ function renderChips() {
     chips.push(`Afinación <b>${d.tuning_cents > 0 ? "+" : ""}${d.tuning_cents}</b> cents <span title="La grabación no está en La 440; se corrigió al transcribir">ⓘ</span>`);
   }
   $("#pChips").innerHTML = chips.map(c => `<span class="chip">${c}</span>`).join("");
+}
+
+// Manos: «Izq.», «Der.» o «Ambas» es la parte que tocás vos en la practica
+// (lo mismo que «Qué tocás vos» en «Más»). Solo se muestra si hay dos manos.
+function applyHands(mode) {
+  for (const t of player.tracks) if (t.hand != null) t.practice = mode === "both" || String(t.hand) === mode;
+  syncHands();
+  if (practice.on) { practice.build(); ui.practicePanel(); }
+}
+
+function syncHands() {
+  const hs = player.tracks.filter(t => t.hand != null);
+  $("#handsBox").hidden = hs.length < 2;
+  const on = hs.filter(t => t.practice).map(t => String(t.hand));
+  const mode = on.length === 2 || (!on.length && !practice.on) ? "both" : on.length === 1 ? on[0] : "";
+  $$("#handSeg button").forEach(b => b.classList.toggle("on", b.dataset.h === mode));
+}
+
+function syncSpeed() {
+  $("#spVal").textContent = Math.round(+$("#speedSel").value * 100) + "%";
 }
 
 function renderTracks() {
@@ -1854,9 +1876,12 @@ const ui = {
 
   practicePanel() {
     const P = practice;
-    $("#practicePanel").hidden = !P.on;
+    // La configuracion de la practica vive en «Más»; mientras se practica,
+    // lo que hay que tocar y como vas se ve arriba de las notas.
+    $("#hud").hidden = !P.on;
+    $("#pClose").hidden = !P.on;
     $("#practiceBtn").classList.toggle("on", P.on);
-    if (!P.on) return;
+    $("#practiceBtn").lastChild.textContent = P.on ? " Dejar de practicar" : " Practicar";
     $$("#pSrc button").forEach(b => b.classList.toggle("on", b.dataset.src === P.source));
     $("#pDev").textContent = P.device || "";
     $("#pMicRow").hidden = P.source !== "mic";
@@ -1873,6 +1898,7 @@ const ui = {
       P.build();
       this.practicePanel();
     }));
+    syncHands();
     this.practiceStatus();
   },
 
@@ -2005,7 +2031,16 @@ function initPlayer() {
   };
   seek.onpointerup = () => (seek.onpointermove = null);
 
-  $("#speedSel").onchange = e => engine.setSpeed(+e.target.value);
+  $("#speedSel").onchange = e => { engine.setSpeed(+e.target.value); syncSpeed(); };
+  const stepSpeed = d => {
+    const sel = $("#speedSel"), i = sel.selectedIndex + d;
+    if (i < 0 || i >= sel.options.length) return;
+    sel.selectedIndex = i;
+    engine.setSpeed(+sel.value);
+    syncSpeed();
+  };
+  $("#spDown").onclick = () => stepSpeed(-1);
+  $("#spUp").onclick = () => stepSpeed(1);
   $("#mix").oninput = e => engine.setMix(+e.target.value);
 
   const setTr = d => {
@@ -2029,6 +2064,7 @@ function initPlayer() {
   $("#metroBtn").onclick = e => {
     player.metronome = !player.metronome;
     e.currentTarget.classList.toggle("on", player.metronome);
+    $("span", e.currentTarget).textContent = player.metronome ? "Encendido" : "Apagado";
     engine.scheduledUntil = engine.time();
   };
 
@@ -2056,14 +2092,17 @@ function initPlayer() {
   $("#pgNext").onclick = () => sheet.goPage(1);
 
   $("#sideBtn").onclick = e => { e.stopPropagation(); $("#side").classList.toggle("open"); };
+  $("#sideClose").onclick = () => $("#side").classList.remove("open");
+
+  // Manos: cual tocás vos (la otra suena sola).
+  $$("#handSeg button").forEach(b => (b.onclick = () => applyHands(b.dataset.h)));
   $("#stage").addEventListener("pointerdown", () => $("#side").classList.remove("open"));
 
   $("#practiceBtn").onclick = () => {
     if (practice.on) practice.stop();
     else {
       if (player.view !== "roll") setView("roll");
-      $("#side").classList.add("open");
-      $("#side").scrollTop = 0;
+      $("#side").classList.remove("open");
       practice.start();
     }
   };
@@ -2168,9 +2207,8 @@ function initPlayer() {
     tempo_factor: player.data.settings?.tempo_factor || 1, beats_per_bar: +e.target.value || null,
   });
 
-  const menu = $("#exportMenu");
-  $("#exportBtn").onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; };
-  document.addEventListener("click", () => (menu.hidden = true));
+  // Exportar es una lista fija dentro de «Más» (antes era un menu que se escondia).
+  const menu = {};
   $$("#exportMenu button").forEach(b => (b.onclick = async () => {
     menu.hidden = true;
     try {
