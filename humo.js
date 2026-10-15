@@ -116,6 +116,24 @@
         (r.pagina != null ? ` · página ${r.pagina} ms` : "") + (r.problemas.length ? `<br>&nbsp;&nbsp;⚠️ ${r.problemas.join("; ")}` : ""));
       show(" — probando…");
     }
+    // Digitacion: ejercicios con digitacion de libro conocida.
+    if (window.Fingering) {
+      const seq = (ps, dt = 0.25) => ps.map((p, i) => [i * dt, i * dt + dt * 0.9, p, 80]);
+      const chord = ps => ps.map(p => [0, 1, p, 80]);
+      const casos = [
+        [seq([60, 62, 64, 65, 67, 69, 71, 72]), 1, "1 2 3 1 2 3 4 5"], [seq([72, 71, 69, 67, 65, 64, 62, 60]), 1, "5 4 3 2 1 3 2 1"],
+        [seq([48, 50, 52, 53, 55, 57, 59, 60]), 0, "5 4 3 2 1 3 2 1"], [seq([60, 59, 57, 55, 53, 52, 50, 48]), 0, "1 2 3 1 2 3 4 5"],
+        [seq([60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81, 83, 84]), 1, "1 2 3 1 2 3 4 1 2 3 1 2 3 4 5"],
+        [chord([60, 64, 67]), 1, "1 3 5"], [chord([48, 52, 55]), 0, "5 3 1"], [chord([60, 64, 67, 72]), 1, "1 2 3 5"],
+        [seq([60, 64, 67, 72]), 1, "1 2 3 5"], [seq([60, 62, 64, 65, 67, 65, 64, 62, 60]), 1, "1 2 3 4 5 4 3 2 1"],
+        [seq([76, 75, 76, 75, 76, 71, 74, 72, 69]), 1, "5 4 5 4 5 2 4 3 1"], [seq([67, 69, 71, 72, 74, 76, 78, 79]), 1, "1 2 3 1 2 3 4 5"],
+        [seq([62, 64, 66, 67, 69, 71, 73, 74]), 1, "1 2 3 1 2 3 4 5"], [seq([65, 67, 69, 70, 72, 74, 76, 77]), 1, "1 2 3 4 1 2 3 4"],
+        [seq([64, 64, 65, 67, 67, 65, 64, 62, 60, 60, 62, 64, 64, 62, 62]), 1, "3 3 4 5 5 4 3 2 1 1 2 3 3 2 2"],
+        [seq([62, 61, 59, 57, 55, 54, 52, 50]), 0, "1 2 3 1 2 3 4 5"],
+      ];
+      const ok = casos.filter(([n, h, want]) => Fingering.assign(n, h).join(" ") === want).length;
+      rows.push(`${ok === casos.length ? "✅" : "❌"} <b>Digitación</b> — ${ok} de ${casos.length} ejercicios iguales al libro`);
+    }
     location.hash = "#/";
     const bad = rows.filter(x => x.startsWith("❌")).length;
     show(bad ? ` — <span style="color:#ff5d73">${bad} con problemas</span>` : ` — <span style="color:#3ddc97">todo OK</span>`);

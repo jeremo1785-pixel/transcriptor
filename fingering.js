@@ -15,6 +15,17 @@
     "4-5": [1, 1, 1, 2, 3, 5],
   };
   const BLACK = new Set([1, 3, 6, 8, 10]);
+  // Posicion de la mano medida en teclas blancas (como la piensa la mano): con
+  // la mano quieta, cada dedo cae una tecla blanca mas arriba que el anterior.
+  // Las negras quedan "a mitad de camino" entre dos blancas.
+  const WHITE = [0, 0.5, 1, 1.5, 2, 3, 3.5, 4, 4.5, 5, 5.5, 6];
+  const wkUp = p => Math.floor(p / 12) * 7 + WHITE[p % 12];
+  // La mano izquierda llega en espejo (alturas negativas): se mide la tecla real.
+  const wk = p => (p < 0 ? -wkUp(-p) : wkUp(p));
+  // Cuanto cuesta mover la mano de posicion (por tecla blanca). Un pianista
+  // toca la frase en una posicion fija si puede: Para Elisa 5-4-5-4-5-2-4-3-1
+  // deja la mano quieta sobre La-Si-Do-Re-Mi.
+  const SHIFT = 0.8;
   const isBlack = p => BLACK.has(((p % 12) + 12) % 12);
 
   // Costo de tocar la nota q con el dedo b despues de la nota p con el dedo a.
@@ -30,12 +41,14 @@
     let c = 0;
     // Pasar el pulgar por abajo (o un dedo por arriba del pulgar): se puede,
     // pero cada paso cuesta; lo natural es pasarlo despues del 3 o del 4.
+    const shift = SHIFT * Math.abs((wk(q) - (b - 1)) - (wk(p) - (a - 1)));
     if (lo === 1 && d < 0) {
-      c = 3 + 0.5 * -d + (hi === 2 ? 1.5 : hi === 5 ? 5 : 0);
+      c = 3 + 0.5 * -d + (hi === 2 ? 1.5 : hi === 5 ? 5 : 0) + shift;
       if (d < minP) c += 12 + 2 * (minP - d);
       if (gap > 0.6) c *= 0.35; else if (gap > 0.3) c *= 0.7;
       return c;
     }
+    c += shift;
     if (d > maxC) c += 2 * (d - maxC);
     if (d < minC) c += 2 * (minC - d);
     if (d < minR) c += (lo === 1 ? 2 : 1) * (minR - d);
@@ -49,8 +62,8 @@
   // Costo propio de un dedo sobre una nota (sin mirar la anterior).
   function fingerCost(f, p, run) {
     let c = 0;
-    if (f === 4) c += 0.6;
-    if (f === 5 && run) c += 0.3;
+    if (f === 4) c += 0.3;
+    if (f === 5 && run) c += 0.1;
     if (f === 1 && isBlack(p)) c += 2.5;
     if (f === 5 && isBlack(p)) c += 1;
     return c;
@@ -82,7 +95,8 @@
       if (d > maxR) c += d - maxR;
       if (d < minR) c += minR - d;
     }
-    for (let i = 0; i < fs.length; i++) c += fingerCost(fs[i], ps[i], false) * 0.5;
+    // (En una nota suelta el costo del dedo ya se cuenta aparte: no se duplica.)
+    if (fs.length > 1) for (let i = 0; i < fs.length; i++) c += fingerCost(fs[i], ps[i], false) * 0.5;
     return c;
   }
 

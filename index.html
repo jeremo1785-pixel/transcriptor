@@ -124,12 +124,19 @@
                 <button data-l="2">Media</button>
                 <button data-l="3">Difícil</button>
               </div>
+              <div class="seg small" id="catKind" hidden>
+                <button data-k="" class="on">Todas</button>
+                <button data-k="clasica">Clásicas</button>
+                <button data-k="moderna">Modernas</button>
+              </div>
               <select id="catComposer"><option value="">Todos los compositores</option></select>
             </div>
           </div>
           <ul id="catList" class="cat-list"></ul>
-          <p class="hint small">Partituras libres del <a href="https://www.mutopiaproject.org" target="_blank" rel="noopener">Mutopia Project</a>
-            (dominio público o Creative Commons). El nivel es una estimación según la velocidad, los acordes y los saltos.</p>
+          <p class="hint small">Clásicas: partituras libres del <a href="https://www.mutopiaproject.org" target="_blank" rel="noopener">Mutopia Project</a>
+            (dominio público o Creative Commons).<span id="catModNote" hidden> Modernas: arreglos de usuarios de MuseScore
+            (colección PDMX), solo en esta PC y para uso personal.</span> El nivel es una estimación según la velocidad,
+            los acordes y los saltos.</p>
         </div>
       </div>
     </section>

@@ -1,0 +1,5 @@
+Piano: Salamander Grand Piano V3 (Yamaha C5), por Alexander Holm.
+Licencia Creative Commons Attribution 3.0 (CC BY 3.0).
+https://archive.org/details/SalamanderGrandPianoV3
+Muestras tomadas de https://tambien.github.io/Piano/audio (4 de las 16
+intensidades: v4, v8, v12, v16), pasadas a mono, recortadas y a 80 kbps.

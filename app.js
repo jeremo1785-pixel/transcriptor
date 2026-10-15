@@ -428,7 +428,7 @@ function updateJobRow(id) {
    ===================================================================== */
 const LEVELS = ["", "Fácil", "Media", "Difícil"];
 const catalog = {
-  items: null, level: 0, q: "", composer: "", shown: 120,
+  items: null, level: 0, q: "", composer: "", kind: "", shown: 120,
 
   async load() {
     if (this.items) return;
@@ -437,6 +437,17 @@ const catalog = {
     } catch {
       this.items = [];
     }
+    for (const o of this.items) o.kind = o.kind || "clasica";
+    // Modernas (PDMX): solo existen en la PC; en el iPad no estan y no pasa nada.
+    try {
+      const r = await fetch("biblioteca/moderna.json");
+      if (r.ok) {
+        const mod = await r.json();
+        for (const o of mod) o.kind = "moderna";
+        this.items = mod.concat(this.items);
+        $("#catKind").hidden = $("#catModNote").hidden = !mod.length;
+      }
+    } catch { /* sin modernas */ }
     $("#catCount").textContent = this.items.length ? `· ${this.items.length}` : "";
     const comps = [...new Set(this.items.map(o => o.composer))].sort((a, b) => a.localeCompare(b));
     $("#catComposer").innerHTML = `<option value="">Todos los compositores</option>` +
@@ -453,6 +464,7 @@ const catalog = {
     const words = norm(this.q).split(/\s+/).filter(Boolean);
     const list = this.items.filter(o =>
       (!this.level || o.level === this.level) && (!this.composer || o.composer === this.composer) &&
+      (!this.kind || o.kind === this.kind) &&
       words.every(w => norm(`${o.title} ${o.composer} ${o.opus} ${o.style}`).includes(w)));
     const added = this.added();
     const ul = $("#catList");
@@ -510,6 +522,11 @@ const catalog = {
       this.render();
     }));
     $("#catComposer").onchange = e => { this.composer = e.target.value; this.render(); };
+    $$("#catKind button").forEach(b => (b.onclick = () => {
+      $$("#catKind button").forEach(x => x.classList.toggle("on", x === b));
+      this.kind = b.dataset.k;
+      this.render();
+    }));
     this.load();
   },
 };
@@ -570,6 +587,140 @@ const SF_FILES = {
   48: "string_ensemble_1", 73: "flute", 53: "voice_oohs",
 };
 
+/* =====================================================================
+   Piano de verdad: muestras del Salamander Grand Piano (Yamaha C5, Alexander
+   Holm, CC BY 3.0), en 4 intensidades y cada tercera menor; las notas del medio
+   se afinan desde la muestra mas cercana. Con caida natural al soltar la
+   tecla, ubicacion estereo segun la altura y el eco de una sala.
+   Mientras carga (o si no carga) suena el piano anterior (soundfont).
+   ===================================================================== */
+// En el iPad, solo las 2 intensidades del medio: las 4 ocupan 127 MB de memoria
+// (medido) y el iPad tambien necesita memoria para transcribir.
+const PIANO_LAYERS = [8, 12];
+const PIANO_NAMES = { 9: "A", 0: "C", 3: "Ds", 6: "Fs" };
+const PIANO_SAMPLES = [];
+for (let m = 21; m <= 108; m++) if (m % 12 in PIANO_NAMES) PIANO_SAMPLES.push(m);
+
+const piano = {
+  buffers: {}, layersReady: new Set(), loading: false, bus: null, held: new Map(),
+
+  file(m, v) { return `vendor/piano/${PIANO_NAMES[m % 12]}${Math.floor(m / 12) - 1}v${v}.mp3`; },
+
+  // Sala: un eco corto y calido generado en el momento (ruido que se apaga).
+  impulse(ctx) {
+    const len = Math.floor(ctx.sampleRate * 2.2), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        const t = i / ctx.sampleRate;
+        lp += 0.35 * ((Math.random() * 2 - 1) - lp);        // ruido suavizado: sala calida
+        d[i] = t < 0.012 ? 0 : lp * Math.exp(-t / 0.55);
+      }
+    }
+    return buf;
+  },
+
+  nodes(ctx, dest) {
+    if (this.bus) return this.bus;
+    const bus = ctx.createGain(), dry = ctx.createGain(), wet = ctx.createGain(), rev = ctx.createConvolver();
+    rev.buffer = this.impulse(ctx);
+    dry.gain.value = 1;
+    wet.gain.value = 0.22;
+    bus.connect(dry).connect(dest);
+    bus.connect(rev).connect(wet).connect(dest);
+    return (this.bus = bus);
+  },
+
+  // Donde empieza a sonar de verdad cada muestra (el mp3 trae unos ms de silencio).
+  onset(buf) {
+    const d = buf.getChannelData(0);
+    let peak = 0;
+    for (let i = 0; i < Math.min(d.length, 8000); i++) peak = Math.max(peak, Math.abs(d[i]));
+    const th = peak * 0.05;
+    for (let i = 0; i < d.length; i++) if (Math.abs(d[i]) > th) return Math.max(0, i - 16) / buf.sampleRate;
+    return 0;
+  },
+
+  async load(ctx) {
+    if (this.loading) return;
+    this.loading = true;
+    ui.sfStatus("Cargando el piano…");
+    for (const v of PIANO_LAYERS) {
+      const todo = PIANO_SAMPLES.slice();
+      const worker = async () => {
+        while (todo.length) {
+          const m = todo.shift();
+          try {
+            const ab = await (await fetch(this.file(m, v))).arrayBuffer();
+            const buf = await new Promise((res, rej) => ctx.decodeAudioData(ab, res, rej));
+            this.buffers[`${m}v${v}`] = { buf, off: this.onset(buf) };
+          } catch { /* esa muestra falla: se usa otra intensidad */ }
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      if (PIANO_SAMPLES.every(m => this.buffers[`${m}v${v}`])) this.layersReady.add(v);
+      if (this.layersReady.size === 1) ui.sfStatus("");
+    }
+    if (!this.layersReady.size) ui.sfStatus("No se pudo cargar el piano; uso el sonido simple.");
+  },
+
+  ready() { return this.layersReady.size > 0; },
+
+  // Intensidad grabada mas cercana a la fuerza con que se toca la nota.
+  layerFor(vel) {
+    const want = vel < 42 ? 4 : vel < 72 ? 8 : vel < 100 ? 12 : 16;
+    if (this.layersReady.has(want)) return want;
+    return [...this.layersReady].sort((a, b) => Math.abs(a - want) - Math.abs(b - want))[0];
+  },
+
+  /**
+   * Toca una nota. Devuelve un objeto con stop(t) (corte rapido, para pausas y
+   * saltos). Si dur es null, suena hasta que se llame a release(t).
+   */
+  play(ctx, dest, pitch, when, dur, vel) {
+    const v = this.layerFor(vel);
+    let m0 = PIANO_SAMPLES[0];
+    for (const m of PIANO_SAMPLES) if (Math.abs(m - pitch) < Math.abs(m0 - pitch)) m0 = m;
+    const s = this.buffers[`${m0}v${v}`];
+    if (!s) return null;
+    const bus = this.nodes(ctx, dest);
+    const src = ctx.createBufferSource(), g = ctx.createGain(), pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    src.buffer = s.buf;
+    src.playbackRate.value = Math.pow(2, (pitch - m0) / 12);
+    // Dentro de cada intensidad grabada, un poco mas fuerte o mas suave.
+    const lo = { 4: 0, 8: 42, 12: 72, 16: 100 }[v], hi = { 4: 42, 8: 72, 12: 100, 16: 128 }[v];
+    const amp = 0.68 * (0.75 + 0.5 * Math.min(1, Math.max(0, (vel - lo) / (hi - lo))));
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(amp, when + 0.004);
+    src.connect(g);
+    if (pan) { pan.pan.value = Math.max(-0.6, Math.min(0.6, (pitch - 64) / 50)); g.connect(pan).connect(bus); } else g.connect(bus);
+    src.start(when, s.off);
+    // Al soltar la tecla el apagador frena la cuerda: rapido en los agudos,
+    // un poco mas lento en los graves (como un piano real).
+    const tau = 0.06 + 0.1 * Math.max(0, (72 - pitch) / 48);
+    const release = t => {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setTargetAtTime(0, t, tau);
+      try { src.stop(t + tau * 8); } catch { /* ya se freno */ }
+    };
+    if (dur != null) release(when + dur);
+    // Volver a tocar la misma tecla apaga la anterior.
+    const prev = this.held.get(pitch);
+    if (prev && prev.when <= when) prev.release(when);
+    const voice = {
+      when, release,
+      stop: t => {
+        g.gain.cancelScheduledValues(t);
+        g.gain.setTargetAtTime(0, t, 0.02);
+        try { src.stop(t + 0.15); } catch { /* ya se freno */ }
+      },
+    };
+    this.held.set(pitch, voice);
+    return voice;
+  },
+};
+
 const engine = {
   ctx: null, audio: null, origGain: null, synthGain: null, metroGain: null,
   playing: false, speed: 1, anchorCtx: 0, anchorMedia: 0,
@@ -597,6 +748,7 @@ const engine = {
     src.connect(this.origGain).connect(master);
     this.synthGain.connect(master);
     this.metroGain.connect(master);
+    piano.load(this.ctx);   // el piano de verdad se carga en segundo plano
     this.audio.addEventListener("ended", () => this.pause());
     // Ruido blanco para la bateria sintetizada.
     const len = this.ctx.sampleRate;
@@ -740,6 +892,11 @@ const engine = {
     if (tr.id === "drums") return this.drum(pitch, when, vel);
     pitch += player.transpose;
     if (pitch < 12 || pitch > 120) return;
+    // Piano: muestras del piano de cola (si ya cargaron).
+    if ((player.sound === "piano" || (tr.program ?? 0) < 8) && piano.ready() && pitch >= 21 && pitch <= 108) {
+      const voice = piano.play(this.ctx, this.synthGain, pitch, when, dur, vel);
+      if (voice) { this.voices.push(voice); return; }
+    }
     const gain = 0.25 + (vel / 127) * 0.9;
     const inst = this.instrumentFor(tr);
     if (inst) {
@@ -765,16 +922,22 @@ const engine = {
   playLive(pitch) {
     this.init();
     this.ctx.resume();
+    this.stopLive(pitch);
+    if (piano.ready()) {
+      const voice = piano.play(this.ctx, this.synthGain, pitch, this.ctx.currentTime, null, 96);
+      if (voice) { practice.live.set(pitch, voice); return; }
+    }
     const inst = this.instrumentFor({ program: 0 });
     if (!inst) return;
-    this.stopLive(pitch);
     const node = inst.play(pitch, this.ctx.currentTime, { gain: 1.1, duration: 8 });
     if (node) practice.live.set(pitch, node);
   },
 
   stopLive(pitch) {
     const node = practice.live.get(pitch);
-    if (node) { try { node.stop(this.ctx.currentTime + 0.05); } catch { /* ya termino */ } }
+    // El piano nuevo se apaga como un piano (al soltar la tecla), no de golpe.
+    if (node && node.release) node.release(this.ctx.currentTime);
+    else if (node) { try { node.stop(this.ctx.currentTime + 0.05); } catch { /* ya termino */ } }
     practice.live.delete(pitch);
   },
 
@@ -2481,7 +2644,7 @@ function route() {
 }
 
 // Para la prueba de humo (humo.js) y para diagnosticar desde la consola.
-window.__app = { player, engine, sheet, practice, roll, setView, focusMode };
+window.__app = { player, engine, sheet, practice, roll, setView, focusMode, piano, summary };
 
 (async function main() {
   initPlayer();
@@ -2492,4 +2655,7 @@ window.__app = { player, engine, sheet, practice, roll, setView, focusMode };
   try { await initHome(); } catch (e) { toast("No se pudo abrir la biblioteca: " + e.message); }
   window.addEventListener("hashchange", route);
   route();
+  // El piano se prepara en segundo plano apenas abre la app: asi la primera
+  // cancion ya suena con el piano bueno y sin tirones mientras carga.
+  setTimeout(() => { try { engine.init(); } catch { /* sin audio */ } }, 1200);
 })();

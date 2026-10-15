@@ -1,6 +1,6 @@
 // Service worker: guarda la app y los modelos en el iPad para que funcione
 // sin internet despues de la primera vez.
-const VERSION = "v13";
+const VERSION = "v14";
 const SHELL = `transcriptor-app-${VERSION}`;
 const MODELS = "transcriptor-modelos-v1";   // los modelos pesados, aparte: no se rebajan en cada version
 
@@ -10,7 +10,23 @@ const ASSETS = [
   "vendor/opensheetmusicdisplay.min.js", "vendor/soundfont-player.min.js",
   "vendor/jspdf.umd.min.js", "pdfexport.js", "humo.js", "fingering.js",
   "vendor/ort/ort.all.min.mjs", "vendor/ort/ort-wasm-simd-threaded.jsep.mjs", "vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
-  "vendor/sf/acoustic_grand_piano-mp3.js", "models/mel_22050_1024_128.f32",
+  "vendor/sf/acoustic_grand_piano-mp3.js",
+  // Piano de cola (Salamander): 2 intensidades x 30 notas.
+  "vendor/piano/A0v12.mp3", "vendor/piano/A0v8.mp3", "vendor/piano/A1v12.mp3", "vendor/piano/A1v8.mp3",
+  "vendor/piano/A2v12.mp3", "vendor/piano/A2v8.mp3", "vendor/piano/A3v12.mp3", "vendor/piano/A3v8.mp3",
+  "vendor/piano/A4v12.mp3", "vendor/piano/A4v8.mp3", "vendor/piano/A5v12.mp3", "vendor/piano/A5v8.mp3",
+  "vendor/piano/A6v12.mp3", "vendor/piano/A6v8.mp3", "vendor/piano/A7v12.mp3", "vendor/piano/A7v8.mp3",
+  "vendor/piano/C1v12.mp3", "vendor/piano/C1v8.mp3", "vendor/piano/C2v12.mp3", "vendor/piano/C2v8.mp3",
+  "vendor/piano/C3v12.mp3", "vendor/piano/C3v8.mp3", "vendor/piano/C4v12.mp3", "vendor/piano/C4v8.mp3",
+  "vendor/piano/C5v12.mp3", "vendor/piano/C5v8.mp3", "vendor/piano/C6v12.mp3", "vendor/piano/C6v8.mp3",
+  "vendor/piano/C7v12.mp3", "vendor/piano/C7v8.mp3", "vendor/piano/C8v12.mp3", "vendor/piano/C8v8.mp3",
+  "vendor/piano/Ds1v12.mp3", "vendor/piano/Ds1v8.mp3", "vendor/piano/Ds2v12.mp3", "vendor/piano/Ds2v8.mp3",
+  "vendor/piano/Ds3v12.mp3", "vendor/piano/Ds3v8.mp3", "vendor/piano/Ds4v12.mp3", "vendor/piano/Ds4v8.mp3",
+  "vendor/piano/Ds5v12.mp3", "vendor/piano/Ds5v8.mp3", "vendor/piano/Ds6v12.mp3", "vendor/piano/Ds6v8.mp3",
+  "vendor/piano/Ds7v12.mp3", "vendor/piano/Ds7v8.mp3", "vendor/piano/Fs1v12.mp3", "vendor/piano/Fs1v8.mp3",
+  "vendor/piano/Fs2v12.mp3", "vendor/piano/Fs2v8.mp3", "vendor/piano/Fs3v12.mp3", "vendor/piano/Fs3v8.mp3",
+  "vendor/piano/Fs4v12.mp3", "vendor/piano/Fs4v8.mp3", "vendor/piano/Fs5v12.mp3", "vendor/piano/Fs5v8.mp3",
+  "vendor/piano/Fs6v12.mp3", "vendor/piano/Fs6v8.mp3", "vendor/piano/Fs7v12.mp3", "vendor/piano/Fs7v8.mp3", "models/mel_22050_1024_128.f32",
 ];
 
 self.addEventListener("install", e => {
