@@ -169,11 +169,13 @@ async function toggleRecording() {
     return;
   }
   let stream;
+  setAudioMode(true);
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
   } catch (e) {
+    setAudioMode(false);
     toast("No se pudo usar el micrófono: " + e.message);
     return;
   }
@@ -187,6 +189,7 @@ async function toggleRecording() {
     clearInterval(timer);
     stream.getTracks().forEach(t => t.stop());
     home.recorder = null;
+    setAudioMode(false);
     home.recBlob = new Blob(chunks, { type: rec.mimeType || "audio/mp4" });
     const prev = $("#recPreview");
     prev.src = URL.createObjectURL(home.recBlob);
@@ -721,6 +724,14 @@ const piano = {
   },
 };
 
+// iPad: el modo «playback» hace que suene aunque este en silencio, pero apaga
+// el microfono. Mientras se usa el microfono (practica o grabar) hace falta
+// «play-and-record», que tambien suena en silencio. Sin esto el microfono no
+// andaba en el iPad (14/10/2026).
+function setAudioMode(record) {
+  try { if (navigator.audioSession) navigator.audioSession.type = record ? "play-and-record" : "playback"; } catch { /* no lo soporta */ }
+}
+
 const engine = {
   ctx: null, audio: null, origGain: null, synthGain: null, metroGain: null,
   playing: false, speed: 1, anchorCtx: 0, anchorMedia: 0,
@@ -730,7 +741,7 @@ const engine = {
   init() {
     if (this.ctx) return;
     // En el iPad: que suene aunque este en modo silencio (es musica, no un aviso).
-    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch { /* no lo soporta */ }
+    setAudioMode(!!practice.mic);
     this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
     this.audio = new Audio();
     this.audio.preload = "auto";
@@ -2156,11 +2167,13 @@ const practice = {
       return;
     }
     let stream;
+    setAudioMode(true);
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
     } catch (e) {
+      setAudioMode(false);
       this.device = "No se pudo usar el micrófono: " + e.message;
       return;
     }
@@ -2188,6 +2201,7 @@ const practice = {
     try { this.mic.node.disconnect(this.mic.an); } catch { /* ya desconectado */ }
     if (this.mic.stream) this.mic.stream.getTracks().forEach(t => t.stop());
     this.mic = null;
+    setAudioMode(false);
   },
 
   detect() {
