@@ -105,9 +105,32 @@
       </div>
 
       <div class="library">
-        <h2>Tus transcripciones</h2>
-        <ul id="jobs" class="jobs"></ul>
-        <p id="emptyLib" class="hint" hidden>Todavía no hay nada. Cargá una canción arriba.</p>
+        <div class="seg lib-tabs" id="libTabs">
+          <button data-lib="mine" class="on">Mis canciones</button>
+          <button data-lib="cat">Biblioteca <small id="catCount"></small></button>
+        </div>
+        <div id="libMine">
+          <ul id="jobs" class="jobs"></ul>
+          <p id="emptyLib" class="hint" hidden>Todavía no hay nada. Cargá una canción o elegí una de la Biblioteca.</p>
+        </div>
+        <!-- Partituras ya cargadas, listas para practicar (Mutopia, piano solo). -->
+        <div id="libCat" hidden>
+          <div class="cat-tools">
+            <input type="search" id="catSearch" class="text" placeholder="Buscar obra o compositor… (Chopin, Gymnopédie, minueto)">
+            <div class="cat-filters">
+              <div class="seg small" id="catLevel">
+                <button data-l="0" class="on">Todas</button>
+                <button data-l="1">Fácil</button>
+                <button data-l="2">Media</button>
+                <button data-l="3">Difícil</button>
+              </div>
+              <select id="catComposer"><option value="">Todos los compositores</option></select>
+            </div>
+          </div>
+          <ul id="catList" class="cat-list"></ul>
+          <p class="hint small">Partituras libres del <a href="https://www.mutopiaproject.org" target="_blank" rel="noopener">Mutopia Project</a>
+            (dominio público o Creative Commons). El nivel es una estimación según la velocidad, los acordes y los saltos.</p>
+        </div>
       </div>
     </section>
 

@@ -327,19 +327,27 @@ export function parseMidi(buf, fallbackTitle = "MIDI") {
   }
   const out = [];
   let melodySeen = false;
+  // Si todo el MIDI es de la familia del piano (programas 0 a 7), es piano
+  // aunque una pista se llame "bass" (la voz grave de la mano izquierda).
+  const allPiano = [...groups.values()].every(g => g.drums || g.program < 8);
   for (const gk of [...groups.keys()].sort()) {
     const g = groups.get(gk);
-    const tid = instrumentTrack(g.name, g.program, 1, g.drums);
+    const tid = allPiano && !g.drums ? "piano" : instrumentTrack(g.name, g.program, 1, g.drums);
     out.push({ track: tid, newMelody: tid === "melodia" && melodySeen,
       notes: g.notes.filter(([a, b2]) => b2 > a).map(([a, b2, n, v]) => [a, b2, n, v, null]) });
     melodySeen = melodySeen || tid === "melodia";
   }
-  // Piano en dos pistas (una por mano): la mas aguda es la derecha.
+  // Piano en varias pistas (una por mano o por voz): las agudas (en promedio
+  // del Do central para arriba) son la derecha; las graves, la izquierda.
   const pianos = out.filter(o => o.track === "piano" && o.notes.length);
-  if (pianos.length === 2) {
-    const mean = o => o.notes.reduce((s, n) => s + n[2], 0) / o.notes.length;
-    const hi = mean(pianos[0]) >= mean(pianos[1]) ? pianos[0] : pianos[1];
-    for (const o of pianos) o.notes = o.notes.map(([a, b2, n, v]) => [a, b2, n, v, o === hi ? 1 : 0]);
+  if (pianos.length >= 2) {
+    const means = pianos.map(o => o.notes.reduce((s, n) => s + n[2], 0) / o.notes.length);
+    let right = means.map(m => m >= 60);
+    if (right.every(Boolean) || !right.some(Boolean)) {
+      const top = Math.max(...means);
+      right = means.map(m => m === top);
+    }
+    pianos.forEach((o, i) => { o.notes = o.notes.map(([a, b2, n, v]) => [a, b2, n, v, right[i] ? 1 : 0]); });
   }
   const [fifths, mode] = keySig ? [keySig[0], keySig[1] ? "minor" : "major"] : [null, null];
   const [beats, beatType] = timeSig || [4, 4];

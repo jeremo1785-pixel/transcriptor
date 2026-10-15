@@ -133,6 +133,7 @@ async function initHome() {
   $("#recBtn").onclick = toggleRecording;
   $("#goBtn").onclick = submitNew;
   syncHomeMode();
+  catalog.init();
 
   // Lo que quedo a medias (se cerro la app mientras procesaba) se retoma solo.
   for (const s of await store.list()) {
@@ -248,7 +249,7 @@ async function importScoreFile(file) {
     created: Date.now(), duration: d.duration, key: d.key?.label, bpm: d.bpm,
     tracks: d.tracks.map(t => ({ id: t.id, label: t.label, count: t.notes.length })),
   });
-  return d.title;
+  return { id, title: d.title };
 }
 
 async function submitNew() {
@@ -265,7 +266,7 @@ async function submitNew() {
       setFile(null);
       setScore(null);
       $("#fileInput").value = $("#scoreInput").value = "";
-      msg.textContent = `«${t}» importada. Ya está en la lista.`;
+      msg.textContent = `«${t.title}» importada. Ya está en la lista.`;
       refreshJobs();
       return;
     }
@@ -420,8 +421,107 @@ function updateJobRow(id) {
   if (bar) bar.style.width = Math.max(2, l.progress * 100) + "%";
 }
 
+
+/* =====================================================================
+   Biblioteca: partituras libres ya cargadas (Mutopia, piano solo).
+   Tocar una obra la agrega a «Mis canciones» y la abre para practicar.
+   ===================================================================== */
+const LEVELS = ["", "Fácil", "Media", "Difícil"];
+const catalog = {
+  items: null, level: 0, q: "", composer: "", shown: 120,
+
+  async load() {
+    if (this.items) return;
+    try {
+      this.items = await (await fetch("biblioteca/biblioteca.json")).json();
+    } catch {
+      this.items = [];
+    }
+    $("#catCount").textContent = this.items.length ? `· ${this.items.length}` : "";
+    const comps = [...new Set(this.items.map(o => o.composer))].sort((a, b) => a.localeCompare(b));
+    $("#catComposer").innerHTML = `<option value="">Todos los compositores</option>` +
+      comps.map(c => `<option>${esc(c)}</option>`).join("");
+  },
+
+  added() {
+    try { return JSON.parse(localStorage.getItem("catAdded") || "{}"); } catch { return {}; }
+  },
+
+  render() {
+    if (!this.items) return;
+    const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const words = norm(this.q).split(/\s+/).filter(Boolean);
+    const list = this.items.filter(o =>
+      (!this.level || o.level === this.level) && (!this.composer || o.composer === this.composer) &&
+      words.every(w => norm(`${o.title} ${o.composer} ${o.opus} ${o.style}`).includes(w)));
+    const added = this.added();
+    const ul = $("#catList");
+    if (!this.items.length) {
+      ul.innerHTML = `<li class="cat-more">No se pudo cargar la biblioteca.</li>`;
+      return;
+    }
+    ul.innerHTML = list.slice(0, this.shown).map(o => `
+      <li class="cat-item" data-id="${esc(o.id)}">
+        <div class="t">${esc(o.title)}</div>
+        <div class="m">${esc(o.composer)}${o.opus ? " · " + esc(o.opus) : ""} · ${fmtTime(o.dur)} · ${esc(o.key)}</div>
+        <div class="r"><span class="lvl l${o.level}">${LEVELS[o.level]}</span>
+          <button class="ghost">${added[o.id] && home.songIds && home.songIds.has(added[o.id]) ? "Abrir" : "Agregar"}</button></div>
+      </li>`).join("") + (list.length > this.shown
+      ? `<li class="cat-more">… y ${list.length - this.shown} más. Buscá por nombre o elegí un compositor.</li>`
+      : list.length ? "" : `<li class="cat-more">No hay obras con ese filtro.</li>`);
+    $$(".cat-item", ul).forEach(li => (li.onclick = () => this.open(this.items.find(o => o.id === li.dataset.id), $("button", li))));
+  },
+
+  // Agrega la obra a «Mis canciones» (si no estaba) y la abre.
+  async open(o, btn) {
+    const added = this.added();
+    if (added[o.id] && home.songIds && home.songIds.has(added[o.id])) {
+      location.hash = `#/cancion/${added[o.id]}`;
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Agregando…";
+    try {
+      const blob = await (await fetch("biblioteca/" + o.file)).blob();
+      const name = `${o.composer} - ${o.title}`.replace(/[\\/:*?"<>|]+/g, " ").trim();
+      const id = await addCatalogSong(new File([blob], name + ".mid", { type: "audio/midi" }), name);
+      added[o.id] = id;
+      try { localStorage.setItem("catAdded", JSON.stringify(added)); } catch { /* nada */ }
+      location.hash = `#/cancion/${id}`;
+    } catch (e) {
+      toast("No se pudo agregar: " + e.message);
+      btn.disabled = false;
+      btn.textContent = "Agregar";
+    }
+  },
+
+  init() {
+    $$("#libTabs button").forEach(b => (b.onclick = async () => {
+      $$("#libTabs button").forEach(x => x.classList.toggle("on", x === b));
+      $("#libMine").hidden = b.dataset.lib !== "mine";
+      $("#libCat").hidden = b.dataset.lib !== "cat";
+      if (b.dataset.lib === "cat") { await this.load(); this.render(); }
+    }));
+    let t;
+    $("#catSearch").oninput = e => { clearTimeout(t); t = setTimeout(() => { this.q = e.target.value; this.shown = 120; this.render(); }, 150); };
+    $$("#catLevel button").forEach(b => (b.onclick = () => {
+      $$("#catLevel button").forEach(x => x.classList.toggle("on", x === b));
+      this.level = +b.dataset.l;
+      this.render();
+    }));
+    $("#catComposer").onchange = e => { this.composer = e.target.value; this.render(); };
+    this.load();
+  },
+};
+
+// iPad: se lee en el navegador, como cualquier MIDI.
+async function addCatalogSong(file) {
+  return (await importScoreFile(file)).id;
+}
+
 async function refreshJobs() {
   const list = await store.list();
+  home.songIds = new Set(list.map(j => j.id));
   const ul = $("#jobs");
   $("#emptyLib").hidden = list.length > 0;
   ul.innerHTML = list.map(j => {

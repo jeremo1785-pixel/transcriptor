@@ -1,0 +1,15 @@
+Biblioteca de partituras ya cargadas (piano solo)
+
+Origen: Mutopia Project (https://www.mutopiaproject.org), descargadas el
+14/10/2026. Cada obra es de dominio publico o tiene licencia Creative Commons
+(la mayoria CC BY-SA): se pueden usar y compartir citando la fuente, que esta
+en el campo "source" de biblioteca.json y en la app («Partituras libres del
+Mutopia Project»).
+
+- mutopia_fuente.json: la lista de obras tal como la publica Mutopia.
+- mutopia/: los archivos MIDI.
+- armar_catalogo.py: arma biblioteca.json (lee cada MIDI con el mismo lector
+  de la app, calcula duracion, tonalidad y nivel Facil/Media/Dificil).
+
+La version iPad usa una copia: transcriptor-ipad/web/biblioteca/ (copiar
+biblioteca.json y mutopia/ si se rearma el catalogo).
