@@ -334,7 +334,8 @@ input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(123,1
 .practice .p-top { display: flex; align-items: center; justify-content: space-between; }
 .practice h4 { display: flex; align-items: center; gap: 7px; margin: 0; color: #ffe39a; }
 .seg.wide { display: flex; width: 100%; margin-top: 9px; }
-.seg.wide button { flex: 1; }
+.seg.wide button { flex: 1; min-width: 0; padding-left: 4px; padding-right: 4px; }
+#pSrc button { font-size: 12px; letter-spacing: -0.01em; }
 .p-label { font-size: 12px; color: var(--muted); margin: 11px 0 5px; }
 .p-parts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .p-part { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 4px 10px; border-radius: 999px;
@@ -385,6 +386,19 @@ body.focus.idle .focus-bar { opacity: 0; transform: translate(-50%, -10px); poin
 body.focus.idle { cursor: none; }
 body.focus #sheetWrap { padding-top: 56px; }
 @media (max-width: 600px) { .focus-bar .seg, .focus-bar .mono { display: none !important; } }
+
+/* Paginas de la partitura. */
+.sheet-nav { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 12;
+  display: flex; align-items: center; gap: 6px; padding: 4px; border-radius: 999px;
+  background: rgba(16, 19, 27, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--line2); box-shadow: 0 8px 24px rgba(0,0,0,.35); color: var(--text); }
+.sheet-nav button { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  border: 0; background: transparent; color: var(--text); }
+.sheet-nav button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+.sheet-nav button:disabled { opacity: .3; }
+.sheet-nav span { font-size: 13px; padding: 0 6px; font-variant-numeric: tabular-nums; }
+.ic.flip { transform: scaleX(-1); }
+#sheetWrap { padding-bottom: 64px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

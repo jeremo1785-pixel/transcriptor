@@ -132,6 +132,7 @@ async function initHome() {
 
   $("#recBtn").onclick = toggleRecording;
   $("#goBtn").onclick = submitNew;
+  syncHomeMode();
 
   // Lo que quedo a medias (se cerro la app mientras procesaba) se retoma solo.
   for (const s of await store.list()) {
@@ -156,7 +157,7 @@ function setScore(f) {
 // Con una partitura no hay nada que elegir: se importa tal cual.
 function syncHomeMode() {
   const score = home.src === "score" || (home.src === "file" && isScoreFile(home.file));
-  $("#modesBox").hidden = score;
+  $("#modesBox").hidden = score || home.modes.length < 2;   // solo piano: nada que elegir
   $("#goBtn").textContent = score ? "Importar partitura" : "Transcribir";
 }
 
@@ -477,6 +478,8 @@ const engine = {
 
   init() {
     if (this.ctx) return;
+    // En el iPad: que suene aunque este en modo silencio (es musica, no un aviso).
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch { /* no lo soporta */ }
     this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
     this.audio = new Audio();
     this.audio.preload = "auto";
@@ -594,7 +597,7 @@ const engine = {
       this.seek(L.a);
       return;
     }
-    const horizon = now + 0.18 * this.speed;
+    const horizon = now + (player.view === "sheet" ? 0.6 : 0.18) * this.speed;
     const from = this.scheduledUntil;
     if (horizon <= from) return;
     const base = this.ctx.currentTime;
@@ -905,6 +908,7 @@ function setView(v) {
   $$("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
   $("#roll").hidden = v !== "roll";
   $("#sheetWrap").hidden = v !== "sheet";
+  if (v !== "sheet") $("#sheetNav").hidden = true;
   $("#sheetNamesBtn").hidden = $("#sheetChordsBtn").hidden = $("#sheetEasyBtn").hidden = v !== "sheet";
   if (v === "sheet") sheet.show();
 }
@@ -1355,71 +1359,146 @@ const sheet = {
     });
   },
 
+  // En el iPad la partitura (MusicXML) se arma en el navegador.
+  async getXml() {
+    return this.xml();
+  },
+
+  // La partitura se dibuja por paginas: dibujar una obra entera tarda varios
+  // segundos con la app congelada (medido: Für Elise 4,3 s; una pagina de 12
+  // compases 0,2 s). Se dibuja la pagina que suena y se pasa sola a la siguiente.
+  pages: [], page: -1, measureTimes: [], pageLead: 0,
+
   async show() {
     const url = this.url();
-    if (this.key === url) return;
+    if (this.key === url) { this.syncPage(true); return; }
     if (this.loading) { this.pending = true; return; }
     this.loading = true;
     const msg = $("#sheetMsg"), div = $("#sheet");
     msg.textContent = "Armando la partitura…";
     try {
       if (!player.visibleIds().length) throw new Error("No hay pistas visibles con notas para mostrar.");
-      const xml = this.xml();
-      latinChords();
+      const xml = await this.getXml(url);
       if (!this.osmd) {
         this.osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(div, {
-          autoResize: true, backend: "svg", drawTitle: true, drawSubtitle: false, drawComposer: false,
+          autoResize: false, backend: "svg", drawTitle: false, drawSubtitle: false, drawComposer: false,
           drawPartNames: true, followCursor: true, drawingParameters: "default", autoBeam: true,
         });
+        // Al cambiar el ancho (girar el iPad, abrir el panel) se redibuja solo la pagina.
+        let rt;
+        new ResizeObserver(() => {
+          clearTimeout(rt);
+          rt = setTimeout(() => { if (this.key && player.view === "sheet") this.renderPage(this.page, true); }, 250);
+        }).observe($("#sheetWrap"));
       }
       this.osmd.EngravingRules.ChordSymbolTextHeight = 2.4;
       await this.osmd.load(xml);
-      msg.textContent = "Dibujando…";
-      await new Promise(r2 => setTimeout(r2, 20));
-      this.osmd.render();
-      this.osmd.cursor.show();
-      this.buildTimes();
+      this.measureMap();
       this.key = url;
+      this.page = -1;
       msg.textContent = "";
+      this.syncPage(true);
     } catch (e) {
       msg.textContent = e.message;
+      $("#sheetNav").hidden = true;
     } finally {
       this.loading = false;
       if (this.pending) { this.pending = false; if (player.view === "sheet") this.show(); }
     }
   },
 
-  // Tiempo (en segundos de la grabacion) de cada posicion del cursor.
-  buildTimes() {
-    const c = this.osmd.cursor, shift = player.barShift();
+  // Tiempo (en segundos de la grabacion) en que empieza cada compas, y paginas.
+  measureMap() {
+    const ms = this.osmd.Sheet.SourceMeasures, shift = player.barShift();
     // Si el primer compas es una anacrusa, OSMD empieza a contar desde ahi,
     // pero en nuestra grilla ese compas empieza 'lead' pulsos mas tarde.
-    const m0 = this.osmd.Sheet.SourceMeasures[0];
+    const m0 = ms[0];
     let lead = 0;
     if (m0 && m0.Duration && m0.ActiveTimeSignature) {
       const actual = m0.Duration.RealValue * 4, full = m0.ActiveTimeSignature.RealValue * 4;
       if (actual < full - 1e-6) lead = full - actual;
     }
-    this.osmd.FollowCursor = false;   // si no, recorrerlo scrollea hasta el final
+    this.pageLead = lead;
+    this.measureTimes = ms.map(m => player.beatToTime(m.AbsoluteTimestamp.RealValue * 4 + lead - shift));
+    const per = this.perPage();
+    this.pages = [];
+    for (let i = 0; i < ms.length; i += per) {
+      this.pages.push({ from: i, to: Math.min(ms.length, i + per) - 1 });
+    }
+  },
+
+  // Compases por pagina segun el ancho: unas 3 o 4 lineas que entran sin scroll.
+  perPage() {
+    const w = $("#sheetWrap").clientWidth || 900;
+    return w >= 1100 ? 16 : w >= 800 ? 12 : 8;
+  },
+
+  pageAt(t) {
+    let p = 0;
+    for (let i = 0; i < this.pages.length; i++) if (this.measureTimes[this.pages[i].from] <= t + 0.05) p = i;
+    return p;
+  },
+
+  // Pone la pagina donde esta sonando la musica (si no es la que se ve).
+  syncPage(force = false) {
+    if (!this.pages.length) return;
+    const p = this.pageAt(engine.time());
+    if (p !== this.page || force) this.renderPage(p, force && p === this.page);
+  },
+
+  renderPage(p, keepScroll = false) {
+    if (!this.osmd || !this.pages.length) return;
+    p = Math.max(0, Math.min(this.pages.length - 1, p));
+    const pg = this.pages[p], ms = this.osmd.Sheet.SourceMeasures;
+    this.osmd.setOptions({
+      drawFromMeasureNumber: ms[pg.from].MeasureNumber,
+      drawUpToMeasureNumber: ms[pg.to].MeasureNumber,
+    });
+    this.osmd.render();
+    this.osmd.cursor.show();
+    this.page = p;
+    this.buildTimes();
+    if (!keepScroll) $("#sheetWrap").scrollTop = 0;
+    const nav = $("#sheetNav");
+    nav.hidden = this.pages.length < 2;
+    $("#pgInfo").textContent = `Página ${p + 1} de ${this.pages.length}`;
+    $("#pgPrev").disabled = p === 0;
+    $("#pgNext").disabled = p === this.pages.length - 1;
+  },
+
+  // Hojear: la musica va al comienzo de esa pagina (y el cursor con ella).
+  goPage(d) {
+    const p = Math.max(0, Math.min(this.pages.length - 1, this.page + d));
+    if (p === this.page) return;
+    engine.seek(this.measureTimes[this.pages[p].from] + 0.01);
+    this.renderPage(p);
+  },
+
+  // Tiempo de cada posicion del cursor dentro de la pagina dibujada.
+  buildTimes() {
+    // Con una copia del recorrido: mover el cursor visible nota por nota
+    // tardaba 0,3 s por pagina (medido), la copia 7 ms.
+    const c = this.osmd.cursor, shift = player.barShift();
     c.reset();
+    const it = c.iterator.clone();
     this.times = [];
     let guard = 0;
-    while (!c.iterator.EndReached && guard++ < 100000) {
-      const quarters = c.iterator.currentTimeStamp.RealValue * 4;
-      this.times.push(player.beatToTime(quarters + lead - shift));
-      c.next();
+    while (!it.EndReached && guard++ < 20000) {
+      this.times.push(player.beatToTime(it.currentTimeStamp.RealValue * 4 + this.pageLead - shift));
+      it.moveToNext();
     }
-    c.reset();
     this.idx = 0;
-    this.osmd.FollowCursor = true;
-    $("#sheetWrap").scrollTop = 0;
   },
 
   follow() {
-    if (!this.osmd || this.key == null || player.view !== "sheet" || !this.times.length) return;
+    if (!this.osmd || this.key == null || player.view !== "sheet" || this.loading) return;
+    if (!this.times.length) return;
     const t = engine.time();
+    // Termino la pagina (o se salto a otro lado): se dibuja la que corresponde.
+    const p = this.pageAt(t);
+    if (p !== this.page) { this.renderPage(p); return; }
     let target = lowerBound(this.times, t + 0.03, x => x) - 1;
-    target = Math.max(0, target);
+    target = Math.max(0, Math.min(this.times.length - 1, target));
     if (target === this.idx) return;
     const c = this.osmd.cursor;
     if (target < this.idx) { c.reset(); this.idx = 0; }
@@ -1595,7 +1674,8 @@ const practice = {
   // ---------------------------------------------------------------- MIDI
   async initMidi() {
     if (!navigator.requestMIDIAccess) {
-      this.device = "Este navegador no tiene MIDI. En la PC usá Chrome o Edge; en iPad, el micrófono.";
+      this.device = "Este navegador no tiene MIDI. En la PC usá Chrome o Edge; en el iPad, la app "
+        + "Web MIDI Browser (o el micrófono).";
       return;
     }
     if (!this.midi) {
@@ -1603,7 +1683,8 @@ const practice = {
         this.midi = await navigator.requestMIDIAccess();
       } catch (e) {
         this.device = "El navegador bloqueó el MIDI. Tocá el candado 🔒 junto a la dirección, "
-          + "permití «Dispositivos MIDI» y volvé a tocar «Teclado MIDI».";
+          + "permití «Dispositivos MIDI» y volvé a tocar «Teclado MIDI». "
+          + `(${(e && (e.name || e.message)) || "sin detalle"})`;
         return;
       }
       this.midi.onstatechange = () => { this.bindMidi(); ui.practicePanel(); };
@@ -1611,19 +1692,56 @@ const practice = {
     this.bindMidi();
   },
 
+  // Lista de teclados. Algunos navegadores (Web MIDI Browser en el iPad) no
+  // entregan un Map como Chrome: se aceptan las tres formas.
+  midiInputs() {
+    const ins = this.midi && this.midi.inputs;
+    if (!ins) return [];
+    if (typeof ins.values === "function") return [...ins.values()];
+    if (typeof ins.forEach === "function") { const out = []; ins.forEach(i => out.push(i)); return out; }
+    return Object.values(ins);
+  },
+
   bindMidi() {
-    const inputs = [...this.midi.inputs.values()];
-    for (const inp of inputs) inp.onmidimessage = e => this.onMidi(e);
+    const inputs = this.midiInputs();
+    for (const inp of inputs) {
+      if (inp.__transcriptor) continue;
+      inp.__transcriptor = true;
+      // Por las dos vias (propiedad y evento): cada navegador usa una; si
+      // llegan las dos, onMidi descarta el repetido.
+      const h = e => this.onMidi(e);
+      inp.onmidimessage = h;
+      try { if (inp.addEventListener) inp.addEventListener("midimessage", h); } catch { /* no lo soporta */ }
+      try { if (inp.open) { const r = inp.open(); if (r && r.catch) r.catch(() => {}); } } catch { /* ya abierto */ }
+    }
+    this.midiCount = inputs.length;
     this.device = inputs.length
-      ? "Conectado: " + inputs.map(i => i.name).join(", ")
+      ? "Conectado: " + inputs.map(i => i.name || "teclado MIDI").join(", ")
       : "No veo ningún teclado MIDI. Conectalo por USB: se detecta solo al enchufarlo.";
+    // Si el navegador no avisa cuando se enchufa un teclado, se revisa solo.
+    clearInterval(this.midiPoll);
+    this.midiPoll = setInterval(() => {
+      if (!this.on || this.source !== "midi") return clearInterval(this.midiPoll);
+      if (this.midiInputs().length !== this.midiCount) { this.bindMidi(); ui.practicePanel(); }
+    }, 2000);
   },
 
   onMidi(e) {
-    const [st, d1, d2] = e.data;
+    if (e === this.lastMidiEvent) return;
+    this.lastMidiEvent = e;
+    const data = e.data || (e.detail && e.detail.data) || [];
+    const [st, d1, d2] = data;
     const cmd = st & 0xf0;
     if (cmd === 0x90 && d2 > 0) this.noteOn(d1);
     else if (cmd === 0x80 || (cmd === 0x90 && d2 === 0)) this.noteOff(d1);
+    // Diagnostico: la ultima señal que llego del teclado (sin el reloj MIDI).
+    if (st < 0xf8) {
+      this.midiMsgs = (this.midiMsgs || 0) + 1;
+      const hex = [...data].slice(0, 3).map(x => x.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+      const name = cmd === 0x90 || cmd === 0x80 ? ` (${noteName(d1, 0, $("#optLatin").checked, true)})` : "";
+      const el = $("#pDev");
+      if (el) el.textContent = `${this.device} · señales recibidas: ${this.midiMsgs} · última: ${hex}${name}`;
+    }
   },
 
   // ---------------------------------------------------------------- microfono
@@ -1934,6 +2052,8 @@ function initPlayer() {
   };
 
   $$("#viewTabs button").forEach(b => (b.onclick = () => setView(b.dataset.view)));
+  $("#pgPrev").onclick = () => sheet.goPage(-1);
+  $("#pgNext").onclick = () => sheet.goPage(1);
 
   $("#sideBtn").onclick = e => { e.stopPropagation(); $("#side").classList.toggle("open"); };
   $("#stage").addEventListener("pointerdown", () => $("#side").classList.remove("open"));
@@ -2099,6 +2219,9 @@ function route() {
     refreshJobs();
   }
 }
+
+// Para la prueba de humo (humo.js) y para diagnosticar desde la consola.
+window.__app = { player, engine, sheet, practice, roll, setView, focusMode };
 
 (async function main() {
   initPlayer();

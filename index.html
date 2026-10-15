@@ -158,6 +158,11 @@
             <div id="sheetMsg" class="sheet-msg"></div>
             <div id="sheet"></div>
           </div>
+          <div class="sheet-nav" id="sheetNav" hidden>
+            <button id="pgPrev" title="Página anterior"><svg class="ic"><use href="#i-back"/></svg></button>
+            <span id="pgInfo"></span>
+            <button id="pgNext" title="Página siguiente"><svg class="ic flip"><use href="#i-back"/></svg></button>
+          </div>
           <div id="transposeNote" class="float-note" hidden>
             La grabación original no se transpone: bajá «Original» en la mezcla para
             escuchar solo las notas en el tono nuevo.
@@ -280,5 +285,6 @@
   <script src="vendor/jspdf.umd.min.js"></script>
   <script src="pdfexport.js"></script>
   <script type="module" src="app.js"></script>
+  <script src="humo.js"></script>
 </body>
 </html>
