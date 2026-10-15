@@ -735,6 +735,12 @@ function setAudioMode(record) {
 const engine = {
   ctx: null, audio: null, origGain: null, synthGain: null, metroGain: null,
   playing: false, speed: 1, anchorCtx: 0, anchorMedia: 0,
+  // media: el reloj sigue a la grabacion original (solo si se escucha). Si no,
+  // el tiempo lo lleva el reloj del AudioContext: preciso y sin demoras. En el
+  // iPad el reproductor de la grabacion tarda 0,1-0,3 s en arrancar y da su
+  // posicion a saltos: con la practica (que frena y sigue en cada nota) y las
+  // partituras (audio en silencio) las notas "saltaban" y no iba fluido.
+  media: false, vt: 0,
   scheduledUntil: 0, voices: [], timer: null,
   instruments: {}, loading: {}, noise: null,
 
@@ -773,14 +779,20 @@ const engine = {
     this.pause();
     this.audio.src = url;
     this.anchorMedia = 0;
+    this.vt = 0;
     this.scheduledUntil = 0;
+  },
+
+  // ¿Hace falta escuchar la grabacion original? (si no, no se usa su reloj)
+  wantsMedia() {
+    return !!(player.data && player.data.source !== "partitura" && this.origGain && this.origGain.gain.value > 0.001);
   },
 
   // Tiempo de la grabacion. El reloj del AudioContext es mucho mas fino que
   // audio.currentTime, asi que se interpola desde el ultimo punto de anclaje.
   time() {
     if (!this.audio) return 0;
-    if (!this.playing) return this.audio.currentTime;
+    if (!this.playing) return this.vt;
     return this.anchorMedia + (this.ctx.currentTime - this.anchorCtx) * this.speed;
   },
 
@@ -792,10 +804,18 @@ const engine = {
   async play() {
     this.init();
     await this.ctx.resume();
-    try { await this.audio.play(); } catch (e) { toast("No se pudo reproducir: " + e.message); return; }
-    this.playing = true;
-    this.anchor();
-    this.scheduledUntil = this.audio.currentTime;
+    this.media = this.wantsMedia();
+    if (this.media) {
+      if (Math.abs(this.audio.currentTime - this.vt) > 0.05) this.audio.currentTime = this.vt;
+      try { await this.audio.play(); } catch (e) { toast("No se pudo reproducir: " + e.message); return; }
+      this.playing = true;
+      this.anchor();
+    } else {
+      this.playing = true;
+      this.anchorMedia = this.vt;
+      this.anchorCtx = this.ctx.currentTime;
+    }
+    this.scheduledUntil = this.anchorMedia;
     clearInterval(this.timer);
     this.timer = setInterval(() => this.tick(), 25);
     ui.onPlayState(true);
@@ -803,6 +823,7 @@ const engine = {
 
   pause() {
     if (!this.audio) return;
+    if (this.playing) this.vt = this.time();
     this.audio.pause();
     this.playing = false;
     clearInterval(this.timer);
@@ -817,7 +838,8 @@ const engine = {
     const dur = this.audio.duration || player.data?.duration || 0;
     t = Math.max(0, Math.min(dur - 0.05, t));
     this.stopVoices();
-    this.audio.currentTime = t;
+    this.vt = t;
+    if (this.media || !this.playing) this.audio.currentTime = t;
     this.anchorCtx = this.ctx ? this.ctx.currentTime : 0;
     this.anchorMedia = t;
     this.scheduledUntil = t;
@@ -828,6 +850,7 @@ const engine = {
     this.speed = s;
     if (!this.audio) return;
     const t = this.time();
+    if (!this.playing) this.vt = t;
     this.audio.playbackRate = s;
     this.stopVoices();
     this.anchorMedia = t;
@@ -840,6 +863,20 @@ const engine = {
     const m = v / 100;
     this.origGain.gain.value = Math.min(1, 2 * (1 - m));
     this.synthGain.gain.value = Math.min(1, 2 * m) * 0.9;
+    // Si mientras suena se empieza (o se deja) de escuchar la grabacion, se
+    // cambia de reloj sin cortar.
+    if (this.playing && this.wantsMedia() !== this.media) {
+      const t = this.time();
+      this.media = !this.media;
+      if (this.media) {
+        this.audio.currentTime = t;
+        this.audio.play().then(() => this.anchor()).catch(() => {});
+      } else {
+        this.audio.pause();
+      }
+      this.anchorMedia = t;
+      this.anchorCtx = this.ctx.currentTime;
+    }
   },
 
   stopVoices() {
@@ -849,10 +886,18 @@ const engine = {
   },
 
   tick() {
-    const now = this.time();
-    // Corrige la deriva contra la posicion real del reproductor.
-    if (Math.abs(this.audio.currentTime - now) > 0.12 && !this.audio.seeking) {
-      this.anchor();
+    let now = this.time();
+    if (this.media) {
+      // Corrige la deriva contra la grabacion: de a poco (un salto de golpe se
+      // ve como un tiron de las notas); de golpe solo si se fue lejos.
+      const drift = this.audio.currentTime - now;
+      if (!this.audio.seeking && !this.audio.paused) {
+        if (Math.abs(drift) > 0.3) { this.anchor(); now = this.time(); }
+        else if (Math.abs(drift) > 0.03) this.anchorMedia += drift * 0.1;
+      }
+    } else if (player.data && now >= player.data.duration) {
+      this.pause();           // sin grabacion, nadie avisa que termino
+      return;
     }
     if (practice.check(now)) return;
     const L = player.loop;
@@ -1291,18 +1336,90 @@ const roll = {
     this.canvas.height = Math.round(r.height * this.dpr);
   },
 
+  // Distribucion de las teclas. Se calcula una vez por tamaño y rango (antes,
+  // en cada cuadro: en el iPad tanto objeto descartable hacia tirones cuando
+  // Safari los limpiaba). Junto con ella se guardan los degradés ya armados.
   keyLayout() {
     const [lo, hi] = player.range;
+    const id = `${this.w}|${this.h}|${lo}|${hi}`;
+    if (this._layout && this._layout.id === id) return this._layout;
     const isBlack = p => [1, 3, 6, 8, 10].includes(((p % 12) + 12) % 12);
     let whites = 0;
     for (let p = lo; p <= hi; p++) if (!isBlack(p)) whites++;
-    const ww = this.w / whites, keys = {};
+    const ww = this.w / whites, keys = {}, list = [];
     let x = 0;
     for (let p = lo; p <= hi; p++) {
       if (isBlack(p)) keys[p] = { x: x - ww * 0.3, w: ww * 0.6, black: true };
       else { keys[p] = { x, w: ww, black: false }; x += ww; }
+      list.push([p, keys[p]]);
     }
-    return { keys, ww };
+    this.gradCache = new Map();
+    return (this._layout = { id, keys, ww, list });
+  },
+
+  // Degradé guardado (se arma una vez y se reusa en cada cuadro).
+  grad(key, make) {
+    let gr = this.gradCache.get(key);
+    if (!gr) { gr = make(); this.gradCache.set(key, gr); }
+    return gr;
+  },
+
+  // Fondo, carriles y teclado en reposo: cambian solo con el tamaño, el rango o
+  // los nombres de las notas. Se dibujan una vez en una imagen aparte y en cada
+  // cuadro se copian enteros (en el iPad, repintar 88 teclas con degradés 60
+  // veces por segundo era mucho trabajo de mas).
+  staticLayer(L, W, H, hit, kbH, latin) {
+    const id = `${L.id}|${this.dpr}|${latin}`;
+    if (this._static && this._static.id === id) return this._static.c;
+    const c = (this._static && this._static.c) || document.createElement("canvas");
+    c.width = Math.round(W * this.dpr);
+    c.height = Math.round(H * this.dpr);
+    const g = c.getContext("2d");
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const bg = g.createLinearGradient(0, 0, 0, hit);
+    bg.addColorStop(0, "#06070b");
+    bg.addColorStop(1, "#10141f");
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
+    for (const [p, k] of L.list) {
+      if (k.black) { g.fillStyle = "rgba(255,255,255,0.018)"; g.fillRect(k.x, 0, k.w, hit); }
+      if (p % 12 === 0) { g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(k.x, 0, 1, hit); }
+    }
+    const white = g.createLinearGradient(0, hit, 0, H);
+    white.addColorStop(0, "#d4d8e0");
+    white.addColorStop(0.08, "#f6f7fa");
+    white.addColorStop(0.85, "#eceef3");
+    white.addColorStop(1, "#c3c8d2");
+    const bkH = kbH * 0.62;
+    const black = g.createLinearGradient(0, hit, 0, hit + bkH);
+    black.addColorStop(0, "#1a1d24");
+    black.addColorStop(0.75, "#2b303b");
+    black.addColorStop(0.9, "#3a404c");
+    black.addColorStop(1, "#14161b");
+    g.fillStyle = "#05060a";
+    g.fillRect(0, hit, W, kbH);
+    g.font = "600 10px system-ui";
+    g.textAlign = "center";
+    for (const [p, k] of L.list) {
+      if (k.black) continue;
+      roundRect(g, k.x + 0.5, hit, k.w - 1, kbH - 1, Math.min(4, k.w / 4));
+      g.fillStyle = white;
+      g.fill();
+      if (p % 12 === 0 && k.w > 14) {
+        g.fillStyle = "#8a93a6";
+        g.fillText(noteName(p, 0, latin, true), k.x + k.w / 2, H - 7);
+      }
+    }
+    for (const [, k] of L.list) {
+      if (!k.black) continue;
+      roundRect(g, k.x, hit - 1, k.w, bkH, Math.min(3, k.w / 4));
+      g.fillStyle = black;
+      g.fill();
+      g.fillStyle = "rgba(255,255,255,0.07)";
+      g.fillRect(k.x + k.w * 0.2, hit + 2, k.w * 0.14, bkH * 0.72);
+    }
+    this._static = { id, c };
+    return c;
   },
 
   // Halo redondo de un color, dibujado una sola vez y reusado (mucho mas
@@ -1351,25 +1468,15 @@ const roll = {
     const pps = +$("#zoom").value;
     const kbH = Math.max(64, Math.min(130, H * 0.17));
     const hit = H - kbH;
-    const { keys, ww } = this.keyLayout();
+    const L = this.keyLayout(), { keys, ww } = L;
     const tTop = t + hit / pps;
     const latin = $("#optLatin").checked, names = $("#optNames").checked;
     const fifths = player.keyNow().fifths;
     // Solo hay chispas si el tiempo avanzo normalmente (no al saltar o arrastrar).
     const flowing = engine.playing && t > this.prevT && t - this.prevT < 0.3;
 
-    // Fondo: oscuro arriba, apenas mas claro cerca de la linea de golpe.
-    const bg = g.createLinearGradient(0, 0, 0, hit);
-    bg.addColorStop(0, "#06070b");
-    bg.addColorStop(1, "#10141f");
-    g.fillStyle = bg;
-    g.fillRect(0, 0, W, H);
-
-    // Carriles: una linea tenue en cada Do y fondo algo mas claro en las negras.
-    for (const [p, k] of Object.entries(keys)) {
-      if (k.black) { g.fillStyle = "rgba(255,255,255,0.018)"; g.fillRect(k.x, 0, k.w, hit); }
-      if (+p % 12 === 0) { g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(k.x, 0, 1, hit); }
-    }
+    // Fondo, carriles y teclado en reposo (ya dibujados): se copian de una vez.
+    g.drawImage(this.staticLayer(L, W, H, hit, kbH, latin), 0, 0, W, H);
 
     // Pulsos y compases.
     const beats = player.data.beats;
@@ -1389,7 +1496,8 @@ const roll = {
     // Notas. Primero las de teclas blancas y despues las de negras, que quedan
     // encima; cada una con borde oscuro y un respiro arriba, para que un acorde
     // de teclas vecinas o la misma nota repetida no se vean como un solo bloque.
-    const active = {};
+    const active = this._active || (this._active = new Map());
+    active.clear();
     const items = [];
     for (const tr of player.tracks) {
       if (!tr.visible || tr.id === "drums") continue;
@@ -1403,7 +1511,7 @@ const roll = {
         if (!k) continue;
         const y1 = hit - (s - t) * pps, y0 = hit - (e - t) * pps;
         const on = s <= t && t < e;
-        if (on) active[p] = tr.color;
+        if (on) active.set(p, tr.color);
         if (fx && flowing && !dim && s > this.prevT && s <= t) {
           this.burst(k.x + k.w / 2, hit, tr.color, k.black ? 8 : 12, k.w * 0.6);
         }
@@ -1437,11 +1545,13 @@ const roll = {
       // Relleno con volumen: borde izquierdo claro, derecho oscuro.
       let base = k.black ? mix(it.color, "#000000", 0.22) : it.color;
       if (it.on) base = mix(base, "#ffffff", 0.22);
-      const gr = g.createLinearGradient(x, 0, x + w, 0);
-      gr.addColorStop(0, mix(base, "#ffffff", 0.3));
-      gr.addColorStop(0.4, base);
-      gr.addColorStop(1, mix(base, "#000000", 0.32));
-      g.fillStyle = gr;
+      g.fillStyle = this.grad(`n${it.p}|${base}`, () => {
+        const gr = g.createLinearGradient(x, 0, x + w, 0);
+        gr.addColorStop(0, mix(base, "#ffffff", 0.3));
+        gr.addColorStop(0.4, base);
+        gr.addColorStop(1, mix(base, "#000000", 0.32));
+        return gr;
+      });
       roundRect(g, x, y, w, h, r);
       g.fill();
       g.lineWidth = it.on ? 1.5 : 1.25;
@@ -1471,9 +1581,12 @@ const roll = {
     }
 
     // Luz de cada tecla: prendida mientras suena, se apaga suave al soltarse.
-    for (const [p, c] of Object.entries(active)) this.glow.set(+p, { c, a: 1 });
+    for (const [p, c] of active) {
+      const gl = this.glow.get(p);
+      if (gl) { gl.c = c; gl.a = 1; } else this.glow.set(p, { c, a: 1 });
+    }
     for (const [p, gl] of this.glow) {
-      if (active[p]) continue;
+      if (active.has(p)) continue;
       gl.a -= dt * 4;
       if (gl.a <= 0) this.glow.delete(p);
     }
@@ -1485,18 +1598,20 @@ const roll = {
         const k = keys[p];
         if (!k) continue;
         // Haz de luz que sube desde la tecla.
-        const beam = g.createLinearGradient(0, hit - bh, 0, hit);
-        beam.addColorStop(0, rgba(gl.c, 0));
-        beam.addColorStop(1, rgba(gl.c, 0.3 * gl.a));
-        g.fillStyle = beam;
+        g.fillStyle = this.grad(`b${gl.c}`, () => {
+          const beam = g.createLinearGradient(0, hit - bh, 0, hit);
+          beam.addColorStop(0, rgba(gl.c, 0));
+          beam.addColorStop(1, rgba(gl.c, 0.3));
+          return beam;
+        });
+        g.globalAlpha = gl.a;
         g.fillRect(k.x, hit - bh, k.w, bh);
         // Destello en el punto de golpe.
         const s = Math.max(ww * 3.4, 44);
-        g.globalAlpha = gl.a;
         g.drawImage(this.sprite(gl.c), k.x + k.w / 2 - s / 2, hit - s / 2, s, s);
         g.globalAlpha = 1;
         // Chisporroteo suave mientras la nota sigue sonando.
-        if (flowing && active[p] && Math.random() < dt * 10) this.burst(k.x + k.w / 2, hit, gl.c, 1, k.w * 0.7, 0.6);
+        if (flowing && active.has(p) && Math.random() < dt * 10) this.burst(k.x + k.w / 2, hit, gl.c, 1, k.w * 0.7, 0.6);
       }
       g.globalCompositeOperation = "source-over";
     }
@@ -1505,10 +1620,12 @@ const roll = {
     const lc = practice.waiting ? "#f2b544" : "#7b8cff";
     if (fx) {
       g.globalCompositeOperation = "lighter";
-      const band = g.createLinearGradient(0, hit - 26, 0, hit);
-      band.addColorStop(0, rgba(lc, 0));
-      band.addColorStop(1, rgba(lc, practice.waiting ? 0.3 : 0.2));
-      g.fillStyle = band;
+      g.fillStyle = this.grad(`h${lc}`, () => {
+        const band = g.createLinearGradient(0, hit - 26, 0, hit);
+        band.addColorStop(0, rgba(lc, 0));
+        band.addColorStop(1, rgba(lc, practice.waiting ? 0.3 : 0.2));
+        return band;
+      });
       g.fillRect(0, hit - 26, W, 26);
       g.globalCompositeOperation = "source-over";
     }
@@ -1524,63 +1641,60 @@ const roll = {
       if (practice.held.has(p)) return { c: HIT_COLOR, a: 1 };
       return this.glow.get(p);
     };
-    const white = g.createLinearGradient(0, hit, 0, H);
-    white.addColorStop(0, "#d4d8e0");
-    white.addColorStop(0.08, "#f6f7fa");
-    white.addColorStop(0.85, "#eceef3");
-    white.addColorStop(1, "#c3c8d2");
     const bkH = kbH * 0.62;
-    const black = g.createLinearGradient(0, hit, 0, hit + bkH);
-    black.addColorStop(0, "#1a1d24");
-    black.addColorStop(0.75, "#2b303b");
-    black.addColorStop(0.9, "#3a404c");
-    black.addColorStop(1, "#14161b");
-    g.fillStyle = "#05060a";
-    g.fillRect(0, hit, W, kbH);
-    for (const [p, k] of Object.entries(keys)) {
+    // El teclado en reposo ya se copio con el fondo: aca solo las teclas
+    // encendidas. Una blanca encendida tapa el borde de sus negras vecinas, que
+    // se vuelven a copiar del teclado en reposo.
+    const stat = this._static.c, dpr = this.dpr, fix = this._fix || (this._fix = new Set());
+    fix.clear();
+    for (const [p, k] of L.list) {
       if (k.black) continue;
+      const tn = tint(p);
+      if (!tn) continue;
       roundRect(g, k.x + 0.5, hit, k.w - 1, kbH - 1, Math.min(4, k.w / 4));
-      g.fillStyle = white;
-      g.fill();
-      const tn = tint(+p);
-      if (tn) {
+      g.globalAlpha = tn.a;
+      g.fillStyle = this.grad(`k${tn.c}`, () => {
         const pg = g.createLinearGradient(0, hit, 0, H);
         pg.addColorStop(0, mix(tn.c, "#000000", 0.25));
         pg.addColorStop(0.25, tn.c);
         pg.addColorStop(1, mix(tn.c, "#ffffff", 0.35));
-        g.globalAlpha = tn.a;
-        g.fillStyle = pg;
-        g.fill();
-        g.globalAlpha = 1;
-      }
-      if (+p % 12 === 0 && k.w > 14) {
-        g.fillStyle = tn && tn.a > 0.5 ? "#fff" : "#8a93a6";
+        return pg;
+      });
+      g.fill();
+      g.globalAlpha = 1;
+      if (p % 12 === 0 && k.w > 14 && tn.a > 0.5) {
+        g.fillStyle = "#fff";
         g.font = "600 10px system-ui";
         g.textAlign = "center";
-        g.fillText(noteName(+p, 0, latin, true), k.x + k.w / 2, H - 7);
+        g.fillText(noteName(p, 0, latin, true), k.x + k.w / 2, H - 7);
         g.textAlign = "left";
       }
+      if (keys[p - 1] && keys[p - 1].black) fix.add(p - 1);
+      if (keys[p + 1] && keys[p + 1].black) fix.add(p + 1);
     }
-    for (const [p, k] of Object.entries(keys)) {
+    for (const [p, k] of L.list) {
       if (!k.black) continue;
-      roundRect(g, k.x, hit - 1, k.w, bkH, Math.min(3, k.w / 4));
-      g.fillStyle = black;
-      g.fill();
-      const tn = tint(+p);
+      const tn = tint(p);
+      if (fix.has(p) || tn) {
+        g.drawImage(stat, k.x * dpr, (hit - 1) * dpr, k.w * dpr, (bkH + 1) * dpr, k.x, hit - 1, k.w, bkH + 1);
+      }
       if (tn) {
+        roundRect(g, k.x, hit - 1, k.w, bkH, Math.min(3, k.w / 4));
         g.globalAlpha = tn.a;
         g.fillStyle = mix(tn.c, "#000000", 0.15);
         g.fill();
         g.globalAlpha = 1;
+        g.fillStyle = "rgba(255,255,255,0.07)";
+        g.fillRect(k.x + k.w * 0.2, hit + 2, k.w * 0.14, bkH * 0.72);
       }
-      g.fillStyle = "rgba(255,255,255,0.07)";
-      g.fillRect(k.x + k.w * 0.2, hit + 2, k.w * 0.14, bkH * 0.72);
     }
     // Sombra de la linea de golpe sobre las teclas.
-    const sh = g.createLinearGradient(0, hit, 0, hit + 10);
-    sh.addColorStop(0, "rgba(0,0,0,0.5)");
-    sh.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = sh;
+    g.fillStyle = this.grad("sombra", () => {
+      const sh = g.createLinearGradient(0, hit, 0, hit + 10);
+      sh.addColorStop(0, "rgba(0,0,0,0.5)");
+      sh.addColorStop(1, "rgba(0,0,0,0)");
+      return sh;
+    });
     g.fillRect(0, hit, W, 10);
 
     if (practice.waiting) {

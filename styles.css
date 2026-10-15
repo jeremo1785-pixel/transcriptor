@@ -500,3 +500,11 @@ body.focus #sheetWrap { padding-top: 56px; }
 .lvl.l2 { color: #ffe39a; background: rgba(242,181,68,.12); border: 1px solid rgba(242,181,68,.35); }
 .lvl.l3 { color: #ffb3bf; background: rgba(255,93,115,.12); border: 1px solid rgba(255,93,115,.35); }
 .cat-more { color: var(--muted); font-size: 13px; text-align: center; padding: 8px; }
+
+/* Rendimiento (iPad): nada de vidrio esmerilado (backdrop-filter) sobre las
+   notas que caen: Safari lo recalcula en cada cuadro y la practica iba a
+   tirones. Fondo oscuro solido, casi igual a la vista. */
+.hud, .focus-bar, .sheet-nav, .float-note, .summary {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.hud, .focus-bar, .sheet-nav, .float-note { background: rgba(14, 17, 24, 0.94) !important; }
+.summary { background: rgba(5, 7, 11, 0.82) !important; }
