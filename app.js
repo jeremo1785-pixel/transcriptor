@@ -806,6 +806,7 @@ async function openSong(id) {
   setData(data);
   player.tracks = buildTracks(data.tracks);
   renderTracks();
+  computeFingers();
   syncHands();
   syncSpeed();
   player.computeRange();
@@ -900,6 +901,18 @@ function syncSpeed() {
   $("#spVal").textContent = Math.round(+$("#speedSel").value * 100) + "%";
 }
 
+// Numeros de dedo de cada mano (fingering.js). Dependen de la altura real
+// (teclas negras), asi que se recalculan al transponer.
+function computeFingers() {
+  if (!window.Fingering) return;
+  for (const t of player.tracks) {
+    if (t.hand == null) continue;
+    try {
+      t.fingers = Fingering.assign(t.notes.map(n => [n[0], n[1], n[2] + player.transpose]), t.hand);
+    } catch { t.fingers = null; }
+  }
+}
+
 function renderTracks() {
   const ul = $("#tracks");
   ul.innerHTML = player.tracks.map((t, i) => `
@@ -953,6 +966,9 @@ function mix(c, d, f) {
   }
   return _mix[key];
 }
+
+// Color de lo que tocaste bien en la practica (notas y teclas), como en Artie.
+const HIT_COLOR = "#22d3ee";
 
 const roll = {
   canvas: null, g: null, w: 0, h: 0, dpr: 1,
@@ -1119,11 +1135,14 @@ const roll = {
         }
         const top = Math.max(0, y0), bot = Math.min(hit, y1);
         if (bot - top < 1) continue;
-        items.push({ k, p, top, bot, on, dim, color: tr.color, clipped: y0 < 0 });
+        const isHit = practice.on && practice.hitNotes.has(notes[i]);
+        items.push({ k, p, top, bot, on, dim, color: isHit ? HIT_COLOR : tr.color, clipped: y0 < 0,
+          finger: tr.fingers ? tr.fingers[i] : 0 });
       }
     }
     items.sort((a, b) => a.k.black - b.k.black);
     const fs = Math.min(12, ww * 0.42);
+    const fingers = $("#optFingers").checked;
     for (const it of items) {
       const { k } = it;
       const pad = k.black ? 1 : 2;
@@ -1163,6 +1182,15 @@ const roll = {
         g.font = `700 ${k.black ? fs * 0.85 : fs}px system-ui`;
         g.textAlign = "center";
         g.fillText(noteName(it.p, fifths, latin), x + w / 2, it.bot - 5);
+        g.textAlign = "left";
+      }
+      // Numero de dedo debajo de la nota (1 = pulgar ... 5 = meñique).
+      if (fingers && it.finger && it.bot + 14 < hit) {
+        g.globalAlpha = it.dim ? 0.35 : 0.95;
+        g.fillStyle = it.color === HIT_COLOR ? HIT_COLOR : mix(it.color, "#ffffff", 0.45);
+        g.font = `800 ${Math.max(10, Math.min(13, ww * 0.5))}px system-ui`;
+        g.textAlign = "center";
+        g.fillText(String(it.finger), x + w / 2, it.bot + 12);
         g.textAlign = "left";
       }
       g.globalAlpha = 1;
@@ -1219,7 +1247,7 @@ const roll = {
     // teclas que se esperan con un recuadro que titila.
     const tint = p => {
       if (practice.flash.has(p) && practice.flash.get(p) > now) return { c: "#ff5d73", a: 1 };
-      if (practice.held.has(p)) return { c: "#43d17a", a: 1 };
+      if (practice.held.has(p)) return { c: HIT_COLOR, a: 1 };
       return this.glow.get(p);
     };
     const white = g.createLinearGradient(0, hit, 0, H);
@@ -1296,7 +1324,7 @@ const roll = {
     if (fx && practice.on) {
       for (const p of practice.held.keys()) {
         const k = keys[p];
-        if (k && !this.prevHeld.has(p)) this.burst(k.x + k.w / 2, hit, "#43d17a", 14, k.w * 0.6, 1.1);
+        if (k && !this.prevHeld.has(p)) this.burst(k.x + k.w / 2, hit, HIT_COLOR, 14, k.w * 0.6, 1.1);
       }
     }
     this.prevHeld = new Set(practice.held.keys());
@@ -1531,9 +1559,78 @@ const sheet = {
 /* =====================================================================
    Practica con un piano real (teclado MIDI o microfono)
    ===================================================================== */
+/* =====================================================================
+   Resumen al terminar de practicar: precision, notas bien, errores, tiempo
+   y las partes que mas costaron (con un boton para practicarlas en bucle).
+   ===================================================================== */
+const summary = {
+  // Numero de compas de un momento de la cancion (igual que en las notas que caen).
+  barAt(t) {
+    const beats = player.data.beats, bpb = player.data.beats_per_bar;
+    const i = Math.max(0, lowerBound(beats, t + 1e-3, x => x) - 1);
+    return Math.floor((i + player.barShift()) / bpb) + 1;
+  },
+
+  show(finished) {
+    const P = practice, tot = P.hits + P.misses;
+    $("#sumTitle").textContent = finished ? "¡Terminaste!" : "Así te fue";
+    $("#sumPct").textContent = tot ? Math.round((P.hits / tot) * 100) + "%" : "–";
+    $("#sumHits").textContent = P.hits;
+    $("#sumMiss").textContent = P.misses;
+    $("#sumHits").nextSibling.textContent = P.hits === 1 ? " nota bien" : " notas bien";
+    $("#sumMiss").nextSibling.textContent = P.misses === 1 ? " error" : " errores";
+    $("#sumTime").textContent = fmtTime((performance.now() - (P.startedAt || performance.now())) / 1000);
+    // Partes de 4 compases, ordenadas por errores.
+    const parts = new Map();
+    for (const st of P.steps) {
+      if (!st.ok && !st.errors) continue;
+      const bar = this.barAt(st.t), key = Math.floor((bar - 1) / 4);
+      const pt = parts.get(key) || { from: key * 4 + 1, to: key * 4 + 4, errors: 0, a: st.t, b: st.t };
+      pt.errors += st.errors;
+      pt.a = Math.min(pt.a, st.t);
+      pt.b = Math.max(pt.b, st.t);
+      parts.set(key, pt);
+    }
+    const worst = [...parts.values()].filter(p => p.errors > 0).sort((x, y) => y.errors - x.errors).slice(0, 3);
+    this.worst = worst;
+    $("#sumParts").innerHTML = worst.length
+      ? `<h4>Lo que más te costó</h4>` + worst.map((p, i) => `
+          <div class="sum-part"><span>Compases ${p.from}–${p.to} · <b>${p.errors} error${p.errors > 1 ? "es" : ""}</b></span>
+          <button class="ghost" data-i="${i}"><svg class="ic"><use href="#i-loop"/></svg> Practicar esta parte</button></div>`).join("")
+      : tot ? `<p class="sum-ok">Sin errores. ¡Muy bien!</p>` : "";
+    $$("#sumParts button").forEach(b => (b.onclick = () => this.loopPart(this.worst[+b.dataset.i])));
+    $("#summary").hidden = false;
+  },
+
+  hide() { $("#summary").hidden = true; },
+
+  // Otra vez desde el principio (o desde el comienzo del bucle, si hay).
+  again() {
+    this.hide();
+    engine.pause();
+    engine.seek(player.loop.a ?? 0);
+    practice.start();
+  },
+
+  // Bucle en la parte dificil y a practicarla.
+  loopPart(p) {
+    this.hide();
+    const L = player.loop;
+    L.a = Math.max(0, p.a - 0.4);
+    L.b = p.b + 1.2;
+    L.stage = 2;
+    const btn = $("#loopBtn");
+    btn.classList.add("on");
+    $("span", btn).textContent = "Quitar bucle";
+    engine.pause();
+    engine.seek(L.a);
+    practice.start();
+  },
+};
+
 const practice = {
   on: false, wait: true, hearMine: false, echo: false, source: "midi",
-  steps: [], idx: 0, waiting: false,
+  steps: [], idx: 0, waiting: false, hitNotes: new WeakSet(), startedAt: 0, finished: false,
   required: new Set(), got: new Set(), held: new Map(), flash: new Map(),
   recent: [], hits: 0, misses: 0, savedMix: null, feedback: "", device: "",
   midi: null, live: new Map(),
@@ -1548,12 +1645,14 @@ const practice = {
     for (const tr of this.tracks()) for (const n of tr.notes) all.push(n);
     all.sort((a, b) => a[0] - b[0]);
     const steps = [];
-    for (const [s, , p] of all) {
+    for (const n of all) {
+      const [s, , p] = n;
       const last = steps[steps.length - 1];
-      if (last && s - last.t < 0.06) last.pitches.add(p + player.transpose);
-      else steps.push({ t: s, pitches: new Set([p + player.transpose]) });
+      if (last && s - last.t < 0.06) { last.pitches.add(p + player.transpose); last.notes.push(n); }
+      else steps.push({ t: s, pitches: new Set([p + player.transpose]), notes: [n], errors: 0, ok: false });
     }
     this.steps = steps;
+    this.hitNotes = new WeakSet();
     this.sync();
   },
 
@@ -1601,6 +1700,7 @@ const practice = {
       if (this.complete()) this.pass(false);
     } else if (now > st.t + 0.35) {
       this.misses++;
+      st.errors++;
       for (const p of st.pitches) if (!this.got.has(p)) this.flash.set(p, performance.now() + 300);
       this.feedback = "Se pasó…";
       this.advance();
@@ -1613,9 +1713,17 @@ const practice = {
     this.required = new Set();
     this.got = new Set();
     ui.practiceStatus();
+    // Llego al final de la cancion: resumen.
+    if (this.idx >= this.steps.length && this.steps.length && !this.finished) {
+      this.finished = true;
+      engine.pause();
+      summary.show(true);
+    }
   },
 
   pass(resume) {
+    const st = this.steps[this.idx];
+    if (st) { st.ok = true; for (const n of st.notes) this.hitNotes.add(n); }
     this.hits++;
     this.feedback = "¡Bien!";
     this.waiting = false;
@@ -1641,6 +1749,8 @@ const practice = {
     const early = next && next.pitches.has(p);
     if (!fromMic && !early && (this.waiting || !this.wait)) {
       this.misses++;
+      const cur = this.steps[this.idx];
+      if (cur) cur.errors++;
       this.feedback = "Esa no";
       this.flash.set(p, now + 350);
       ui.practiceStatus();
@@ -1655,6 +1765,9 @@ const practice = {
   async start() {
     this.on = true;
     this.hits = this.misses = 0;
+    this.startedAt = performance.now();
+    this.finished = false;
+    summary.hide();
     this.feedback = "";
     if (!this.tracks().length) {
       const hands = player.tracks.filter(t => t.hand != null);
@@ -1673,7 +1786,10 @@ const practice = {
     await this.setSource(this.source);
   },
 
-  stop() {
+  // withSummary: al dejarla con el boton (no al cambiar de cancion), si ya
+  // se toco un rato, se muestra el resumen.
+  stop(withSummary = false) {
+    if (withSummary && !this.finished && this.hits + this.misses >= 8) summary.show(false);
     this.on = false;
     this.waiting = false;
     this.required = new Set();
@@ -2045,6 +2161,7 @@ function initPlayer() {
 
   const setTr = d => {
     player.transpose = Math.max(-12, Math.min(12, player.transpose + d));
+    computeFingers();
     $("#trVal").textContent = (player.transpose > 0 ? "+" : "") + player.transpose;
     $("#transposeNote").hidden = player.transpose === 0 || +$("#mix").value >= 90;
     engine.stopVoices();
@@ -2099,14 +2216,16 @@ function initPlayer() {
   $("#stage").addEventListener("pointerdown", () => $("#side").classList.remove("open"));
 
   $("#practiceBtn").onclick = () => {
-    if (practice.on) practice.stop();
+    if (practice.on) practice.stop(true);
     else {
       if (player.view !== "roll") setView("roll");
       $("#side").classList.remove("open");
       practice.start();
     }
   };
-  $("#pClose").onclick = () => practice.stop();
+  $("#pClose").onclick = () => practice.stop(true);
+  $("#sumClose").onclick = () => summary.hide();
+  $("#sumAgain").onclick = () => summary.again();
   $$("#pSrc button").forEach(b => (b.onclick = () => practice.setSource(b.dataset.src)));
   $("#pSens").oninput = e => (practice.micSens = 38 - +e.target.value);
   $("#pWait").onchange = e => {
@@ -2154,13 +2273,16 @@ function initPlayer() {
       localStorage.setItem("sheetNames", $("#optSheetNames").checked ? "1" : "0");
       localStorage.setItem("latin", $("#optLatin").checked ? "1" : "0");
       localStorage.setItem("fx", $("#optFx").checked ? "1" : "0");
+      localStorage.setItem("fingers", $("#optFingers").checked ? "1" : "0");
     } catch { /* sin almacenamiento local */ }
   };
   $("#optFx").onchange = remember;
+  $("#optFingers").onchange = remember;
   try {
     if (localStorage.getItem("sheetNames") === "1") $("#optSheetNames").checked = true;
     if (localStorage.getItem("latin") === "0") $("#optLatin").checked = false;
     if (localStorage.getItem("fx") === "0") $("#optFx").checked = false;
+    if (localStorage.getItem("fingers") === "0") $("#optFingers").checked = false;
   } catch { /* sin almacenamiento local */ }
   syncNamesBtn();
   $("#optSheetNames").onchange = () => { remember(); refreshSheet(); };

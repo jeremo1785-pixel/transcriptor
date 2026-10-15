@@ -154,6 +154,23 @@
               <span><b id="pPct">–</b></span>
             </div>
           </div>
+          <!-- Resumen al terminar (o al dejar de practicar). -->
+          <div class="summary" id="summary" hidden>
+            <div class="sum-card">
+              <h3 id="sumTitle">¡Terminaste!</h3>
+              <div class="sum-big"><b id="sumPct">–</b><span>de precisión</span></div>
+              <div class="sum-row">
+                <span><b id="sumHits">0</b> notas bien</span>
+                <span><b id="sumMiss">0</b> errores</span>
+                <span><b id="sumTime">0:00</b> practicando</span>
+              </div>
+              <div id="sumParts" class="sum-parts"></div>
+              <div class="sum-actions">
+                <button class="ghost" id="sumClose">Cerrar</button>
+                <button class="practice-btn" id="sumAgain"><svg class="ic"><use href="#i-restart"/></svg> Practicar de nuevo</button>
+              </div>
+            </div>
+          </div>
           <canvas id="roll"></canvas>
           <div id="sheetWrap" hidden>
             <div id="sheetMsg" class="sheet-msg"></div>
@@ -227,6 +244,7 @@
 
           <h4>Vista</h4>
           <label class="check"><input type="checkbox" id="optNames" checked> Nombres en las notas que caen</label>
+          <label class="check"><input type="checkbox" id="optFingers" checked> Números de dedo <small>(1 = pulgar)</small></label>
           <label class="check"><input type="checkbox" id="optLatin" checked> Do-Re-Mi (en vez de C-D-E)</label>
           <label class="check"><input type="checkbox" id="optFx" checked> Efectos de luz y chispas</label>
           <label class="check"><input type="checkbox" id="optFull"> Teclado completo (88 teclas)</label>
@@ -319,6 +337,7 @@
   <script src="vendor/opensheetmusicdisplay.min.js"></script>
   <script src="vendor/jspdf.umd.min.js"></script>
   <script src="pdfexport.js"></script>
+  <script src="fingering.js"></script>
   <script type="module" src="app.js"></script>
   <script src="humo.js"></script>
 </body>

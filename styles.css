@@ -457,3 +457,25 @@ body.focus #sheetWrap { padding-top: 56px; }
 .hud .p-status:empty { display: none; }
 .hud-score { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
 .hud-score b { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- resumen (etapa 3) */
+.summary { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px;
+  background: rgba(5, 7, 11, 0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn .25s var(--ease); }
+.sum-card { width: min(440px, 100%); max-height: 100%; overflow: auto; text-align: center;
+  background: linear-gradient(180deg, var(--panel2), var(--panel)); border: 1px solid var(--line2);
+  border-radius: 20px; padding: 24px 22px 20px; box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+.sum-card h3 { margin: 0 0 10px; font-size: 20px; color: var(--text); text-transform: none; letter-spacing: 0; }
+.sum-big b { display: block; font-size: 56px; line-height: 1.05; font-weight: 800;
+  background: linear-gradient(135deg, #22d3ee, #3ddc97); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sum-big span { color: var(--muted); font-size: 13px; }
+.sum-row { display: flex; justify-content: center; gap: 18px; margin: 14px 0 6px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.sum-row b { color: var(--text); font-size: 17px; margin-right: 3px; font-variant-numeric: tabular-nums; }
+.sum-parts { text-align: left; margin: 14px 0 4px; }
+.sum-parts h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); }
+.sum-part { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 12px; margin-bottom: 6px; background: rgba(255,255,255,.03); }
+.sum-part b { color: #ffb3bf; font-weight: 600; }
+.sum-part button { white-space: nowrap; }
+.sum-ok { color: var(--ok); font-size: 14px; margin: 10px 0 0; }
+.sum-actions { display: flex; justify-content: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
