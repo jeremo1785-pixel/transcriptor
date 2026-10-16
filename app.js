@@ -238,6 +238,24 @@ async function importPackage(file) {
   return meta.title;
 }
 
+// Canciones mandadas desde la PC a GitHub (compartidas/): solo las notas,
+// sin la grabacion. Aparecen en la biblioteca («Desde tu PC»); al tocar una
+// se guarda en el iPad como cualquier partitura.
+async function importShared(o) {
+  const song = await (await fetch(`compartidas/${o.shared}.json`, { cache: "no-store" })).json();
+  const d = song.data;
+  const id = newId();
+  d.title = song.title;
+  await store.putBlob(id + ":audio", silentWav(d.duration));
+  await store.putBlob(id + ":notes", d);
+  await store.put({
+    id, title: song.title, mode: song.mode, status: "ready", stage: "Listo", progress: 1,
+    created: Date.now(), duration: d.duration, key: d.key?.label, bpm: d.bpm, imported: true,
+    tracks: d.tracks.map(t => ({ id: t.id, label: t.label, count: t.notes.length })),
+  });
+  return id;
+}
+
 // Partitura (MusicXML o MIDI): las notas vienen escritas, se guarda directo.
 // El audio es silencio del mismo largo, para que el reproductor funcione igual.
 async function importScoreFile(file) {
@@ -454,6 +472,15 @@ const catalog = {
         $("#catKind").hidden = $("#catModNote").hidden = !mod.length;
       }
     } catch { /* sin modernas */ }
+    // Mandadas desde la PC (solo existen en la version de GitHub).
+    try {
+      const r = await fetch("compartidas/index.json", { cache: "no-store" });
+      if (r.ok) {
+        const pc = (await r.json()).map(x => ({ id: `pc-${x.id}-${x.sent}`, shared: x.id, sent: x.sent, kind: "pc",
+          title: x.title, composer: "Desde tu PC", dur: x.duration || 0, level: 0, key: "", opus: "", style: "" }));
+        this.items = pc.concat(this.items);
+      }
+    } catch { /* sin compartidas */ }
     $("#catCount").textContent = this.items.length ? `· ${this.items.length}` : "";
     const comps = [...new Set(this.items.map(o => o.composer))].sort((a, b) => a.localeCompare(b));
     $("#catComposer").innerHTML = `<option value="">Todos los compositores</option>` +
@@ -508,9 +535,13 @@ const catalog = {
     btn.disabled = true;
     btn.classList.add("busy");
     try {
-      const blob = await (await fetch("biblioteca/" + o.file)).blob();
-      const name = `${o.composer} - ${o.title}`.replace(/[\\/:*?"<>|]+/g, " ").trim();
-      const id = await addCatalogSong(new File([blob], name + ".mid", { type: "audio/midi" }), name);
+      let id;
+      if (o.kind === "pc") id = await importShared(o);
+      else {
+        const blob = await (await fetch("biblioteca/" + o.file)).blob();
+        const name = `${o.composer} - ${o.title}`.replace(/[\\/:*?"<>|]+/g, " ").trim();
+        id = await addCatalogSong(new File([blob], name + ".mid", { type: "audio/midi" }), name);
+      }
       added[o.id] = id;
       try { localStorage.setItem("catAdded", JSON.stringify(added)); } catch { /* nada */ }
       location.hash = `#/cancion/${id}`;
@@ -587,7 +618,7 @@ function coverHtml(o, opts = {}) {
   let keysSvg = "";
   for (let i = 0; i < 14; i++) keysSvg += `<rect x="${i * 7.14 + 0.4}" y="84" width="6.4" height="16" rx="1" fill="#fff" opacity=".9"/>`;
   for (let i = 0; i < 13; i++) if ([0, 1, 3, 4, 5].includes(i % 7)) keysSvg += `<rect x="${i * 7.14 + 4.9}" y="84" width="4" height="9.5" rx=".8" fill="#11131a"/>`;
-  const initial = esc((o.composer && o.composer !== "Varios" ? o.composer.split(/[\s.]+/).filter(w => w && !/^(jr|sr|ii|iii)$/i.test(w)).pop() : o.title || "?").slice(0, 14));
+  const initial = esc((o.composer && o.composer !== "Varios" && o.kind !== "pc" ? o.composer.split(/[\s.]+/).filter(w => w && !/^(jr|sr|ii|iii)$/i.test(w)).pop() : o.title || "?").slice(0, 14));
   return `<div class="cover" style="background:linear-gradient(140deg,${c1},${c2})">
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${bars}
         <rect x="0" y="81" width="100" height="3" fill="#fff" opacity=".55"/>${keysSvg}</svg>
@@ -600,7 +631,7 @@ function coverHtml(o, opts = {}) {
 
 function songCard(o) {
   return `<button class="song-card" data-id="${esc(o.id)}">
-      ${coverHtml(o, { badge: o.kind === "moderna" ? "Moderna" : "" })}
+      ${coverHtml(o, { badge: o.kind === "moderna" ? "Moderna" : o.kind === "pc" ? "Tuya" : "" })}
       <span class="sc-t">${esc(o.title)}</span>
       <span class="sc-m">${esc(o.composer)} · ${fmtTime(o.dur)}</span>
     </button>`;
@@ -609,6 +640,7 @@ function songCard(o) {
 // Que tan conocida es: las modernas por cuantas veces se vieron en MuseScore,
 // las clasicas por la lista de arriba.
 function popularity(o) {
+  if (o.kind === "pc") return 1000 + o.sent / 1e10;      // las tuyas, primero
   if (o.kind === "moderna") return Math.log10((o.views || 0) + 10) * 10;
   const i = FAMOUS.findIndex(f => o.id.includes(f));
   return i < 0 ? 0 : 70 - i;
@@ -620,7 +652,7 @@ const shelves = {
     const box = $("#shelves");
     if (!box || !items.length) return;
     const byPop = [...items].sort((a, b) => popularity(b) - popularity(a));
-    const mod = byPop.filter(o => o.kind === "moderna"), cla = byPop.filter(o => o.kind !== "moderna" && popularity(o) > 0);
+    const mod = byPop.filter(o => o.kind === "moderna"), cla = byPop.filter(o => o.kind === "clasica" && popularity(o) > 0);
     // Populares: se intercalan las modernas mas vistas y las clasicas mas conocidas.
     const pop = [];
     for (let i = 0; pop.length < 16 && (i < mod.length || i < cla.length); i++) {
@@ -628,7 +660,9 @@ const shelves = {
       if (cla[i]) pop.push(cla[i]);
     }
     const easy = byPop.filter(o => o.level === 1).slice(0, 16);
+    const pcs = items.filter(o => o.kind === "pc").sort((a, b) => b.sent - a.sent);
     const rows = [
+      ...(pcs.length ? [["Desde tu PC", "Las que mandaste con el botón «iPad»", pcs.slice(0, 20), { kind: "pc" }]] : []),
       ["Populares", "Las que más se tocan", pop, { kind: "" }],
       ["Para empezar", "Fáciles y conocidas", easy, { level: 1 }],
       ["Clásicos imprescindibles", "Las obras que todos conocen", cla.slice(0, 16), { kind: "clasica" }],
