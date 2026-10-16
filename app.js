@@ -472,19 +472,35 @@ const catalog = {
         $("#catKind").hidden = $("#catModNote").hidden = !mod.length;
       }
     } catch { /* sin modernas */ }
-    // Mandadas desde la PC (solo existen en la version de GitHub).
-    try {
-      const r = await fetch("compartidas/index.json", { cache: "no-store" });
-      if (r.ok) {
-        const pc = (await r.json()).map(x => ({ id: `pc-${x.id}-${x.sent}`, shared: x.id, sent: x.sent, kind: "pc",
-          title: x.title, composer: "Desde tu PC", dur: x.duration || 0, level: 0, key: "", opus: "", style: "" }));
-        this.items = pc.concat(this.items);
-      }
-    } catch { /* sin compartidas */ }
+    await this.loadShared();
     $("#catCount").textContent = this.items.length ? `· ${this.items.length}` : "";
     const comps = [...new Set(this.items.map(o => o.composer))].sort((a, b) => a.localeCompare(b));
     $("#catComposer").innerHTML = `<option value="">Todos los compositores</option>` +
       comps.map(c => `<option>${esc(c)}</option>`).join("");
+  },
+
+  // Mandadas desde la PC (solo existen en la version de GitHub). Se vuelven a
+  // buscar al volver a la app o al inicio: puede haber llegado una nueva.
+  async loadShared() {
+    let pc = [];
+    try {
+      const r = await fetch("compartidas/index.json", { cache: "no-store" });
+      if (!r.ok) return false;
+      pc = (await r.json()).map(x => ({ id: `pc-${x.id}-${x.sent}`, shared: x.id, sent: x.sent, kind: "pc",
+        title: x.title, composer: "Desde tu PC", dur: x.duration || 0, level: 0, key: "", opus: "", style: "" }));
+    } catch { return false; }
+    const old = (this.items || []).filter(o => o.kind === "pc").map(o => o.id).join();
+    if (old === pc.map(o => o.id).join()) return false;
+    this.items = pc.concat((this.items || []).filter(o => o.kind !== "pc"));
+    return true;
+  },
+
+  async refreshShared() {
+    if (!this.items) return;
+    if (!(await this.loadShared())) return;
+    $("#catCount").textContent = `· ${this.items.length}`;
+    if (!$("#libHome").hidden) shelves.render();
+    if (!$("#libCat").hidden) this.render();
   },
 
   added() {
@@ -557,6 +573,9 @@ const catalog = {
     let last = "home";
     try { last = localStorage.getItem("libTab") || "home"; } catch { /* nada */ }
     libTab(["home", "mine", "cat"].includes(last) ? last : "home");
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !$("#home").hidden) this.refreshShared();
+    });
     let t;
     $("#catSearch").oninput = e => { clearTimeout(t); t = setTimeout(() => { this.q = e.target.value; this.shown = 120; this.render(); }, 150); };
     $$("#catLevel button").forEach(b => (b.onclick = () => {
@@ -1146,6 +1165,11 @@ const engine = {
     if (tr.id === "drums") return this.drum(pitch, when, vel);
     pitch += player.transpose;
     if (pitch < 12 || pitch > 120) return;
+    // Lo que toca la app (acompañamiento): el microfono no lo tiene que
+    // confundir con lo que tocás vos.
+    const outs = this.outs || (this.outs = []);
+    outs.push([pitch, when]);
+    if (outs.length > 128) outs.splice(0, 64);
     // Piano: muestras del piano de cola (si ya cargaron).
     if ((player.sound === "piano" || (tr.program ?? 0) < 8) && piano.ready() && pitch >= 21 && pitch <= 108) {
       const voice = piano.play(this.ctx, this.synthGain, pitch, when, dur, vel);
@@ -2594,14 +2618,16 @@ const practice = {
     };
     // Nivel de cada tecla: los dos armonicos mas fuertes de los tres primeros
     // (los graves del piano casi no tienen fundamental).
-    const sal = new Float32Array(128).fill(-200);
+    const sal = new Float32Array(128).fill(-200), fund = new Float32Array(128).fill(-200);
     for (let p = 21; p <= 108; p++) {
       const f0 = 440 * Math.pow(2, (p - 69) / 12);
-      const hs = [peak(f0), peak(2 * f0), peak(3 * f0)].sort((a, b) => b - a);
+      const hs = [fund[p] = peak(f0), peak(2 * f0), peak(3 * f0)].sort((a, b) => b - a);
       sal[p] = (hs[0] + hs[1]) / 2;
     }
     m.hist.push(sal);
-    if (m.hist.length > 7) m.hist.shift();
+    if (m.hist.length > 13) m.hist.shift();
+    (m.fhist || (m.fhist = [])).push(fund);
+    if (m.fhist.length > 7) m.fhist.shift();
 
     // Se escucha lo que se espera ahora y, si todavia no llego a la linea, el
     // paso siguiente (por si se toca un poquito antes).
@@ -2609,16 +2635,41 @@ const practice = {
     const next = this.steps[this.idx + (this.required.size ? 1 : 0)];
     if (next && !this.waiting && next.t - engine.time() < 0.2) next.pitches.forEach(p => cand.add(p));
     const now = performance.now();
+    // Los graves tardan mas en aparecer en el analisis (la ventana es de 1/3 s):
+    // para ellos se compara con lo que sonaba hace mas tiempo.
+    const back = p => (p < 48 ? 12 : 6);
+    const attacked = p => {
+      let prevMin = Infinity;
+      for (let i = Math.max(0, m.hist.length - 1 - back(p)); i < m.hist.length - 1; i++) prevMin = Math.min(prevMin, m.hist[i][p]);
+      // Fuerte: sobre el ruido de fondo, o entre lo mas fuerte que suena (los
+      // graves reparten su energia en muchos armonicos y levantan el "fondo").
+      const loud = sal[p] - floor > this.micSens || (sal[p] > mx - 20 && sal[p] - floor > this.micSens / 2);
+      return isFinite(prevMin) && sal[p] - prevMin > 8 && loud;
+    };
+    // ¿Lo explica otro sonido? La app acaba de tocar esa nota o una que la
+    // tiene de armonico (octava, quinta...), o sono a la vez una nota mas
+    // grave que no se esperaba (su armonico parece esta tecla). Sin esto la
+    // practica a veces avanzaba sola con el acompañamiento.
+    const ct = engine.ctx.currentTime, HARM = [0, 12, 19, 24, 28];
+    const byApp = p => (engine.outs || []).some(([q, at]) => at <= ct + 0.03 && ct - at < 0.25 && HARM.includes(p - q));
+    // (la nota grave tiene que sonar con su propia fundamental: su nivel
+    // "sal" incluye sus armonicos, o sea esta misma tecla)
+    const fundAttack = q => {
+      let prevMin = Infinity;
+      for (let i = 0; i < m.fhist.length - 1; i++) prevMin = Math.min(prevMin, m.fhist[i][q]);
+      return isFinite(prevMin) && fund[q] - prevMin > 8 && fund[q] - floor > this.micSens;
+    };
+    // (y fuerte: el golpe de cualquier tecla levanta un poco todos los graves)
+    const byLower = p => [12, 19, 24].some(d => p - d >= 21 && !cand.has(p - d) && fundAttack(p - d)
+      && fund[p - d] > sal[p] - 10);
     for (const p of cand) {
       if (p < 21 || p > 108) continue;
-      let prevMin = Infinity;
-      for (let i = 0; i < m.hist.length - 1; i++) prevMin = Math.min(prevMin, m.hist[i][p]);
-      if (!isFinite(prevMin)) continue;
       const v = sal[p];
-      const attack = v - prevMin > 8;                          // golpe nuevo, no algo que ya sonaba
-      const loud = v - floor > this.micSens;                    // por encima del ruido
       const own = v > Math.max(sal[p - 1], sal[p + 1]) + 3;      // es esta tecla y no la de al lado
-      if (attack && loud && own && now - (m.last.get(p) || 0) > 250) {
+      // De Do3 para arriba el piano tiene fundamental: tiene que sonar ella (si
+      // no, un armonico compartido con otra nota parecia esta tecla).
+      const fundOk = p < 48 || fundAttack(p);
+      if (attacked(p) && own && fundOk && now - (m.last.get(p) || 0) > (p < 48 ? 450 : 250) && !byApp(p) && !byLower(p)) {
         m.last.set(p, now);
         this.noteOn(p, true);
         setTimeout(() => this.held.delete(p), 220);
@@ -3064,6 +3115,7 @@ function route() {
     $("#player").hidden = true;
     $("#home").hidden = false;
     refreshJobs();
+    catalog.refreshShared();
   }
 }
 
