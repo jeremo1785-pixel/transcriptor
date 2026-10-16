@@ -1486,7 +1486,10 @@ const roll = {
     const end = () => {
       if (drag && drag.moved && drag.was) engine.play();
       // En pantalla completa, un toque (sin arrastrar) da play o pausa.
-      else if (drag && !drag.moved && focusMode.on) engine.toggle();
+      else if (drag && !drag.moved && focusMode.on) {
+        engine.toggle();
+        if (focusMode.touch && !focusMode.fsElement()) focusMode.askFs();
+      }
       drag = null;
     };
     this.canvas.addEventListener("pointerup", end);
@@ -2692,13 +2695,22 @@ const ui = {
    ===================================================================== */
 const focusMode = {
   on: false, timer: null,
-  // iPad y celulares: la pantalla completa "de verdad" del navegador se sale
-  // sola al tocar la pantalla o al dar play (y con ella se salia de este modo).
-  // Ahi alcanza con esconder los menus; la app instalada ya no tiene barras.
+  // iPad y celulares: Safari puede cerrar su pantalla completa al tocar la
+  // pantalla; entonces este modo NO se cierra con ella (antes si, y se salia
+  // de la practica) y el proximo toque la vuelve a pedir.
   touch: matchMedia("(hover: none) and (pointer: coarse)").matches
     || (navigator.maxTouchPoints > 1 && /iPad|Macintosh/.test(navigator.userAgent)),
 
   fsElement() { return document.fullscreenElement || document.webkitFullscreenElement; },
+
+  // Pedirle al navegador la pantalla completa (sin la barra de Safari).
+  askFs() {
+    const el = document.documentElement;
+    try {
+      const r = (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+      if (r && r.catch) r.catch(() => {});
+    } catch { /* el navegador no lo permite */ }
+  },
 
   toggle(v = !this.on) {
     this.on = v;
@@ -2710,7 +2722,7 @@ const focusMode = {
     // En la app instalada del iPad no hace falta: ya no tiene barras.
     const el = document.documentElement;
     try {
-      if (v && !this.fsElement() && !this.touch) {
+      if (v && !this.fsElement()) {
         const r = (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
         if (r && r.catch) r.catch(() => {});
       } else if (!v && this.fsElement()) {
@@ -2749,9 +2761,10 @@ const focusMode = {
     $("#fExit").onclick = () => (practice.on ? practice.stop(true) : this.toggle(false));
     $("#fPlay").onclick = () => engine.toggle();
     $("#fSpDown").onclick = () => $("#spDown").click();
-    $("#poPlay").onclick = e => { e.stopPropagation(); engine.play(); };
+    const resume = e => { e.stopPropagation(); engine.play(); if (this.touch && !this.fsElement()) this.askFs(); };
+    $("#poPlay").onclick = resume;
     $("#poExit").onclick = e => { e.stopPropagation(); practice.stop(true); };
-    $("#pauseOv").onclick = () => engine.play();
+    $("#pauseOv").onclick = resume;
     $("#fSpUp").onclick = () => $("#spUp").click();
     $$("#fView button").forEach(b => (b.onclick = () => { setView(b.dataset.view); this.syncView(); }));
     // Si se sale con Esc o el gesto del sistema, salir tambien del modo.
