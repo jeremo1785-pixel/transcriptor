@@ -1130,7 +1130,7 @@ const engine = {
 
     for (const tr of player.tracks) {
       if (!player.audible(tr)) continue;
-      if (practice.on && tr.practice && !practice.hearMine) continue; // esa parte la tocas vos
+      if (practice.on && (tr.practice ? !practice.hearMine : !practice.accompanies(tr))) continue;
       const notes = tr.notes;
       for (let i = lowerBound(notes, from); i < notes.length && notes[i][0] < horizon; i++) {
         const [s, e, p, v] = notes[i];
@@ -2300,6 +2300,12 @@ const practice = {
 
   tracks() { return player.tracks.filter(t => t.practice); },
 
+  // Practicando, la app solo toca la OTRA mano cuando elegiste una sola; con
+  // las dos manos no suena nada (solo te escucha a vos).
+  accompanies(tr) {
+    return tr.hand != null && !tr.practice && player.tracks.some(t => t.hand != null && t.practice);
+  },
+
   // Pasos a tocar: las notas de las pistas elegidas, agrupadas en acordes
   // (lo que empieza con menos de 60 ms de diferencia se toca junto).
   build() {
@@ -2436,9 +2442,10 @@ const practice = {
       const first = player.tracks.find(t => t.id !== "drums");
       (hands.length ? hands : first ? [first] : []).forEach(t => (t.practice = true));
     }
-    if (this.wait) {
-      // Frenar y seguir en cada nota corta la grabacion original a cada rato:
-      // en la practica se escucha solo el acompanamiento sintetizado.
+    {
+      // Practicando no suena la grabacion original (frenar y seguir la corta a
+      // cada rato y el microfono la confundiria con lo que tocás): a lo sumo,
+      // la otra mano con el piano de la app (ver accompanies).
       this.savedMix = +$("#mix").value;
       $("#mix").value = 100;
       engine.setMix(100);
