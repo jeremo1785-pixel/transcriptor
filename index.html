@@ -46,7 +46,16 @@
   <main>
     <!-- ============================================================ INICIO -->
     <section id="home" class="view">
+      <div class="home-head">
+        <div>
+          <h1>¿Qué tocamos hoy?</h1>
+          <p>Elegí una canción y practicala con las notas cayendo.</p>
+        </div>
+        <button id="newBtn" class="primary"><svg class="ic"><use href="#i-upload"/></svg> Agregar canción</button>
+      </div>
+      <div class="modal" id="newModal" hidden>
       <div class="card new">
+        <button class="icon modal-x" id="newClose" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
         <h2>Nueva transcripción</h2>
 
         <div class="seg" id="srcTabs" role="tablist">
@@ -104,12 +113,22 @@
         </div>
       </div>
 
+      </div><!-- /newModal -->
+
       <div class="library">
         <div class="seg lib-tabs" id="libTabs">
-          <button data-lib="mine" class="on">Mis canciones</button>
-          <button data-lib="cat">Biblioteca <small id="catCount"></small></button>
+          <button data-lib="home" class="on">Inicio</button>
+          <button data-lib="mine">Mis canciones</button>
+          <button data-lib="cat">Explorar <small id="catCount"></small></button>
         </div>
-        <div id="libMine">
+        <div id="libHome">
+          <section class="shelf" id="shelfMine" hidden>
+            <div class="shelf-head"><div><h3>Seguí practicando</h3><span>Tus canciones</span></div></div>
+            <div class="shelf-row"></div>
+          </section>
+          <div id="shelves"></div>
+        </div>
+        <div id="libMine" hidden>
           <ul id="jobs" class="jobs"></ul>
           <p id="emptyLib" class="hint" hidden>Todavía no hay nada. Cargá una canción o elegí una de la Biblioteca.</p>
         </div>
@@ -132,10 +151,10 @@
               <select id="catComposer"><option value="">Todos los compositores</option></select>
             </div>
           </div>
-          <ul id="catList" class="cat-list"></ul>
+          <ul id="catList" class="cat-grid"></ul>
           <p class="hint small">Clásicas: partituras libres del <a href="https://www.mutopiaproject.org" target="_blank" rel="noopener">Mutopia Project</a>
             (dominio público o Creative Commons).<span id="catModNote" hidden> Modernas: arreglos de usuarios de MuseScore
-            (colección PDMX), solo en esta PC y para uso personal.</span> El nivel es una estimación según la velocidad,
+            (colección PDMX), para uso personal.</span> El nivel es una estimación según la velocidad,
             los acordes y los saltos.</p>
         </div>
       </div>
@@ -173,6 +192,11 @@
               <button data-view="sheet">Partitura</button>
             </div>
             <span id="fStatus" class="f-status"></span>
+            <div class="f-prog"><i id="fProgFill"></i></div>
+            <span id="fScore" class="f-score"></span>
+            <div class="f-speed" title="Velocidad">
+              <button id="fSpDown" aria-label="Más lento">−</button><span id="fSpeed">100%</span><button id="fSpUp" aria-label="Más rápido">+</button>
+            </div>
             <button id="fExit" class="ghost" title="Salir de pantalla completa (Esc)"><svg class="ic"><use href="#i-shrink"/></svg> Salir</button>
           </div>
           <!-- Practica: lo que hay que tocar y como vas, arriba de las notas. -->
@@ -202,6 +226,11 @@
             </div>
           </div>
           <canvas id="roll"></canvas>
+          <!-- Practica en pausa: play grande en el medio. -->
+          <div class="pause-ov" id="pauseOv" hidden>
+            <button id="poPlay" class="po-play" title="Seguir"><svg class="ic fill"><use href="#i-play"/></svg></button>
+            <button id="poExit" class="po-exit">Terminar práctica</button>
+          </div>
           <div id="sheetWrap" hidden>
             <div id="sheetMsg" class="sheet-msg"></div>
             <div id="sheet"></div>

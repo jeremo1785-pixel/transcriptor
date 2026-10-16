@@ -134,6 +134,7 @@ async function initHome() {
   $("#goBtn").onclick = submitNew;
   syncHomeMode();
   catalog.init();
+  newSheet.init();
 
   // Lo que quedo a medias (se cerro la app mientras procesaba) se retoma solo.
   for (const s of await store.list()) {
@@ -433,8 +434,10 @@ const LEVELS = ["", "Fácil", "Media", "Difícil"];
 const catalog = {
   items: null, level: 0, q: "", composer: "", kind: "", shown: 120,
 
-  async load() {
-    if (this.items) return;
+  // Una sola carga aunque la pidan varios a la vez (inicio y explorar).
+  load() { return this._p || (this._p = this._load()); },
+
+  async _load() {
     try {
       this.items = await (await fetch("biblioteca/biblioteca.json")).json();
     } catch {
@@ -475,16 +478,24 @@ const catalog = {
       ul.innerHTML = `<li class="cat-more">No se pudo cargar la biblioteca.</li>`;
       return;
     }
-    ul.innerHTML = list.slice(0, this.shown).map(o => `
-      <li class="cat-item" data-id="${esc(o.id)}">
-        <div class="t">${esc(o.title)}</div>
-        <div class="m">${esc(o.composer)}${o.opus ? " · " + esc(o.opus) : ""} · ${fmtTime(o.dur)} · ${esc(o.key)}</div>
-        <div class="r"><span class="lvl l${o.level}">${LEVELS[o.level]}</span>
-          <button class="ghost">${added[o.id] && home.songIds && home.songIds.has(added[o.id]) ? "Abrir" : "Agregar"}</button></div>
-      </li>`).join("") + (list.length > this.shown
+    // Sin buscar nada, primero las mas conocidas.
+    if (!words.length) list.sort((a, b) => popularity(b) - popularity(a));
+    void added;
+    ul.innerHTML = list.slice(0, this.shown).map(songCard).join("") + (list.length > this.shown
       ? `<li class="cat-more">… y ${list.length - this.shown} más. Buscá por nombre o elegí un compositor.</li>`
       : list.length ? "" : `<li class="cat-more">No hay obras con ese filtro.</li>`);
-    $$(".cat-item", ul).forEach(li => (li.onclick = () => this.open(this.items.find(o => o.id === li.dataset.id), $("button", li))));
+    this.bindCards(ul);
+  },
+
+  bindCards(root) {
+    $$(".song-card[data-id]", root).forEach(b => (b.onclick = () => this.open(this.items.find(o => o.id === b.dataset.id), b)));
+  },
+
+  setFilter(kind, level) {
+    this.kind = kind; this.level = level; this.q = ""; this.composer = "";
+    $("#catSearch").value = ""; $("#catComposer").value = "";
+    $$("#catKind button").forEach(x => x.classList.toggle("on", x.dataset.k === kind));
+    $$("#catLevel button").forEach(x => x.classList.toggle("on", +x.dataset.l === level));
   },
 
   // Agrega la obra a «Mis canciones» (si no estaba) y la abre.
@@ -495,7 +506,7 @@ const catalog = {
       return;
     }
     btn.disabled = true;
-    btn.textContent = "Agregando…";
+    btn.classList.add("busy");
     try {
       const blob = await (await fetch("biblioteca/" + o.file)).blob();
       const name = `${o.composer} - ${o.title}`.replace(/[\\/:*?"<>|]+/g, " ").trim();
@@ -506,17 +517,15 @@ const catalog = {
     } catch (e) {
       toast("No se pudo agregar: " + e.message);
       btn.disabled = false;
-      btn.textContent = "Agregar";
+      btn.classList.remove("busy");
     }
   },
 
   init() {
-    $$("#libTabs button").forEach(b => (b.onclick = async () => {
-      $$("#libTabs button").forEach(x => x.classList.toggle("on", x === b));
-      $("#libMine").hidden = b.dataset.lib !== "mine";
-      $("#libCat").hidden = b.dataset.lib !== "cat";
-      if (b.dataset.lib === "cat") { await this.load(); this.render(); }
-    }));
+    $$("#libTabs button").forEach(b => (b.onclick = () => libTab(b.dataset.lib)));
+    let last = "home";
+    try { last = localStorage.getItem("libTab") || "home"; } catch { /* nada */ }
+    libTab(["home", "mine", "cat"].includes(last) ? last : "home");
     let t;
     $("#catSearch").oninput = e => { clearTimeout(t); t = setTimeout(() => { this.q = e.target.value; this.shown = 120; this.render(); }, 150); };
     $$("#catLevel button").forEach(b => (b.onclick = () => {
@@ -539,9 +548,164 @@ async function addCatalogSong(file) {
   return (await importScoreFile(file)).id;
 }
 
+/* =====================================================================
+   Inicio: estantes como en las apps de piano (populares, para empezar,
+   clásicos...) con portadas. Las portadas se dibujan aca mismo (colores y
+   notas segun el nombre): no hay que bajar imagenes y andan sin internet.
+   ===================================================================== */
+// Clasicas mas conocidas, de la mas a la menos (parte del id de Mutopia).
+const FAMOUS = ["fur_elise_woo59", "bergamesq_clair", "satiee-gymnopedie_1", "chopin_nocturne_op9_n2",
+  "joplins-entertainer", "wtk1-prelude1", "rondoallaturca", "kv545-k545-1", "chopin_valse_op64_no1",
+  "blue_danube", "debussy_arabesque_1", "joplins-maple", "gnossienne-no_1", "anna-magdalena-04",
+  "fantaisie-impromptu", "roi_de_la_montagne", "pathetique-2", "bach-invention-01", "chop-28-4-chop",
+  "lamortdase", "liszt-consolation-no3", "bizetg-prelude", "gymnopedie_2", "gymnopedie_3",
+  "op68-02-marche", "kv397-fantasia", "bwvanh131-air", "muller-siciliano", "k545-2", "gnossienne-no_2",
+  "debussy_arabesque_2", "chop-28-20", "woodensoldiers", "chop-28-6", "morningprayer", "bwv1006a_3",
+  "chopin_nocturne_op9_n3", "nocturne_in_e_minor", "kv331_1_1_tema", "op68-09"];
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+// Pares de colores elegidos a mano (se ven bien con texto blanco encima).
+const COVER_PAIRS = [["#5b6cff", "#b26bff"], ["#ff6a88", "#ff9a5a"], ["#1fb6a6", "#3b82f6"], ["#f59e0b", "#ef4444"],
+  ["#8b5cf6", "#ec4899"], ["#06b6d4", "#6366f1"], ["#22c55e", "#0ea5e9"], ["#f43f5e", "#8b5cf6"],
+  ["#0ea5e9", "#14b8a6"], ["#a855f7", "#6366f1"], ["#fb7185", "#f59e0b"], ["#2563eb", "#7c3aed"]];
+
+function coverHtml(o, opts = {}) {
+  const h = hashStr(o.id || o.title || "x");
+  const [c1, c2] = COVER_PAIRS[h % COVER_PAIRS.length];
+  // Notas cayendo sobre un tecladito: siempre las mismas para cada cancion.
+  let r = h, bars = "";
+  const rnd = () => ((r = Math.imul(r ^ (r >>> 15), 2246822507) >>> 0) % 1000) / 1000;
+  for (let i = 0; i < 7; i++) {
+    const x = 6 + Math.floor(rnd() * 13) * 7, y = 8 + rnd() * 48, hh = 8 + rnd() * 26;
+    bars += `<rect x="${x}" y="${y.toFixed(1)}" width="5.4" height="${hh.toFixed(1)}" rx="2.2" fill="#fff" opacity="${(0.22 + rnd() * 0.4).toFixed(2)}"/>`;
+  }
+  let keysSvg = "";
+  for (let i = 0; i < 14; i++) keysSvg += `<rect x="${i * 7.14 + 0.4}" y="84" width="6.4" height="16" rx="1" fill="#fff" opacity=".9"/>`;
+  for (let i = 0; i < 13; i++) if ([0, 1, 3, 4, 5].includes(i % 7)) keysSvg += `<rect x="${i * 7.14 + 4.9}" y="84" width="4" height="9.5" rx=".8" fill="#11131a"/>`;
+  const initial = esc((o.composer && o.composer !== "Varios" ? o.composer.split(/[\s.]+/).filter(w => w && !/^(jr|sr|ii|iii)$/i.test(w)).pop() : o.title || "?").slice(0, 14));
+  return `<div class="cover" style="background:linear-gradient(140deg,${c1},${c2})">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${bars}
+        <rect x="0" y="81" width="100" height="3" fill="#fff" opacity=".55"/>${keysSvg}</svg>
+      <span class="cv-name">${initial}</span>
+      ${o.level ? `<span class="cv-lvl l${o.level}">${LEVELS[o.level]}</span>` : ""}
+      ${opts.badge ? `<span class="cv-badge">${esc(opts.badge)}</span>` : ""}
+      <span class="cv-play"><svg class="ic fill"><use href="#i-play"/></svg></span>
+    </div>`;
+}
+
+function songCard(o) {
+  return `<button class="song-card" data-id="${esc(o.id)}">
+      ${coverHtml(o, { badge: o.kind === "moderna" ? "Moderna" : "" })}
+      <span class="sc-t">${esc(o.title)}</span>
+      <span class="sc-m">${esc(o.composer)} · ${fmtTime(o.dur)}</span>
+    </button>`;
+}
+
+// Que tan conocida es: las modernas por cuantas veces se vieron en MuseScore,
+// las clasicas por la lista de arriba.
+function popularity(o) {
+  if (o.kind === "moderna") return Math.log10((o.views || 0) + 10) * 10;
+  const i = FAMOUS.findIndex(f => o.id.includes(f));
+  return i < 0 ? 0 : 70 - i;
+}
+
+const shelves = {
+  render() {
+    const items = catalog.items || [];
+    const box = $("#shelves");
+    if (!box || !items.length) return;
+    const byPop = [...items].sort((a, b) => popularity(b) - popularity(a));
+    const mod = byPop.filter(o => o.kind === "moderna"), cla = byPop.filter(o => o.kind !== "moderna" && popularity(o) > 0);
+    // Populares: se intercalan las modernas mas vistas y las clasicas mas conocidas.
+    const pop = [];
+    for (let i = 0; pop.length < 16 && (i < mod.length || i < cla.length); i++) {
+      if (mod[i]) pop.push(mod[i]);
+      if (cla[i]) pop.push(cla[i]);
+    }
+    const easy = byPop.filter(o => o.level === 1).slice(0, 16);
+    const rows = [
+      ["Populares", "Las que más se tocan", pop, { kind: "" }],
+      ["Para empezar", "Fáciles y conocidas", easy, { level: 1 }],
+      ["Clásicos imprescindibles", "Las obras que todos conocen", cla.slice(0, 16), { kind: "clasica" }],
+    ];
+    if (mod.length) {
+      rows.push(["Pop, películas y juegos", "Arreglos para piano", mod.filter(o => o.level <= 2).slice(0, 16), { kind: "moderna" }]);
+    }
+    rows.push(["Para desafiarte", "Nivel difícil", byPop.filter(o => o.level === 3).slice(0, 16), { level: 3 }]);
+    box.innerHTML = rows.filter(r => r[2].length).map(([t, sub, list], i) => `
+      <section class="shelf">
+        <div class="shelf-head"><div><h3>${t}</h3><span>${sub}</span></div>
+          <button class="link" data-row="${i}">Ver todo</button></div>
+        <div class="shelf-row">${list.map(songCard).join("")}</div>
+      </section>`).join("");
+    $$(".shelf-head .link", box).forEach(b => (b.onclick = () => {
+      const f = rows[+b.dataset.row][3];
+      catalog.setFilter(f.kind ?? "", f.level ?? 0);
+      libTab("cat");
+    }));
+    catalog.bindCards(box);
+  },
+
+  // «Seguí practicando»: las canciones propias listas, las ultimas primero.
+  renderMine(list) {
+    const box = $("#shelfMine");
+    if (!box) return;
+    const ready = list.filter(j => j.status === "ready").slice(0, 16);
+    box.hidden = !ready.length;
+    if (!ready.length) return;
+    $(".shelf-row", box).innerHTML = ready.map(j => `
+      <button class="song-card mine" data-song="${esc(j.id)}">
+        ${coverHtml({ id: j.id, title: j.title, composer: "" }, { badge: j.mode === "partitura" ? "Partitura" : "Transcripta" })}
+        <span class="sc-t">${esc(j.title)}</span>
+        <span class="sc-m">${j.duration ? fmtTime(j.duration) : ""}</span>
+      </button>`).join("");
+    $$(".song-card", box).forEach(b => (b.onclick = () => (location.hash = `#/cancion/${b.dataset.song}`)));
+  },
+};
+
+function libTab(name) {
+  $$("#libTabs button").forEach(x => x.classList.toggle("on", x.dataset.lib === name));
+  $("#libHome").hidden = name !== "home";
+  $("#libMine").hidden = name !== "mine";
+  $("#libCat").hidden = name !== "cat";
+  if (name === "cat") catalog.load().then(() => catalog.render());
+  if (name === "home") catalog.load().then(() => shelves.render());
+  try { localStorage.setItem("libTab", name); } catch { /* nada */ }
+}
+
+// «Agregar canción»: transcribir un audio, abrir una partitura o grabar, en
+// una ventana aparte (antes ocupaba media pantalla de inicio).
+const newSheet = {
+  open() { $("#newModal").hidden = false; },
+  close() { $("#newModal").hidden = true; },
+  init() {
+    $("#newBtn").onclick = () => this.open();
+    $("#newClose").onclick = () => this.close();
+    $("#newModal").addEventListener("pointerdown", e => { if (e.target.id === "newModal") this.close(); });
+    // Al mandar algo: se cierra y se ve en «Mis canciones» (o se abre).
+    $("#goBtn").addEventListener("click", () => {
+      const before = $("#jobs").children.length, hash = location.hash;
+      const t0 = Date.now();
+      const watch = setInterval(() => {
+        if (location.hash !== hash || $("#jobs").children.length > before) {
+          clearInterval(watch);
+          this.close();
+          if (location.hash === hash) libTab("mine");
+        } else if (Date.now() - t0 > 120000) clearInterval(watch);
+      }, 300);
+    });
+  },
+};
+
 async function refreshJobs() {
   const list = await store.list();
   home.songIds = new Set(list.map(j => j.id));
+  shelves.renderMine(list);
   const ul = $("#jobs");
   $("#emptyLib").hidden = list.length > 0;
   ul.innerHTML = list.map(j => {
@@ -1083,7 +1247,8 @@ const player = {
   },
 
   computeRange() {
-    if ($("#optFull").checked) { this.range = [21, 108]; return; }
+    // Practicando: el piano entero (88 teclas), como el de verdad.
+    if ($("#optFull").checked || (practice.on && focusMode.on)) { this.range = [21, 108]; return; }
     let lo = 127, hi = 0;
     for (const t of this.tracks) {
       if (!t.visible || t.id === "drums") continue;
@@ -1217,7 +1382,7 @@ function syncHands() {
 }
 
 function syncSpeed() {
-  $("#spVal").textContent = Math.round(+$("#speedSel").value * 100) + "%";
+  $("#spVal").textContent = $("#fSpeed").textContent = Math.round(+$("#speedSel").value * 100) + "%";
 }
 
 // Numeros de dedo de cada mano (fingering.js). Dependen de la altura real
@@ -1320,6 +1485,8 @@ const roll = {
     });
     const end = () => {
       if (drag && drag.moved && drag.was) engine.play();
+      // En pantalla completa, un toque (sin arrastrar) da play o pausa.
+      else if (drag && !drag.moved && focusMode.on) engine.toggle();
       drag = null;
     };
     this.canvas.addEventListener("pointerup", end);
@@ -1466,7 +1633,7 @@ const roll = {
 
     const t = engine.time();
     const pps = +$("#zoom").value;
-    const kbH = Math.max(64, Math.min(130, H * 0.17));
+    const kbH = focusMode.on ? Math.max(90, Math.min(200, H * 0.22)) : Math.max(64, Math.min(130, H * 0.17));
     const hit = H - kbH;
     const L = this.keyLayout(), { keys, ww } = L;
     const tTop = t + hit / pps;
@@ -1527,9 +1694,11 @@ const roll = {
     const fingers = $("#optFingers").checked;
     for (const it of items) {
       const { k } = it;
-      const pad = k.black ? 1 : 2;
+      // Aire entre notas vecinas (un acorde de teclas juntas no se ve como un
+      // solo bloque) y entre la misma nota repetida.
+      const pad = k.black ? Math.max(1, k.w * 0.08) : Math.max(2, ww * 0.1);
       const x = k.x + pad, w = k.w - pad * 2;
-      const y = it.clipped ? it.top : it.top + 2;
+      const y = it.clipped ? it.top : it.top + 3;
       const h = it.bot - y;
       if (h < 1) continue;
       const r = Math.min(5, w / 3);
@@ -1537,8 +1706,8 @@ const roll = {
       if (fx && it.on && !it.dim) {
         // Halo alrededor de la nota que esta sonando.
         g.globalCompositeOperation = "lighter";
-        g.globalAlpha = 0.5;
-        g.drawImage(this.sprite(it.color), x - w * 0.9, y - 14, w * 2.8, h + 28);
+        g.globalAlpha = 0.4;
+        g.drawImage(this.sprite(it.color), x - w * 0.45, y - 10, w * 1.9, h + 20);
         g.globalCompositeOperation = "source-over";
         g.globalAlpha = 1;
       }
@@ -1562,11 +1731,18 @@ const roll = {
         g.fillRect(x + r, y + 1.5, w - r * 2, 1);
       }
       if (names && h > 16 && w > 11) {
-        g.fillStyle = k.black ? "rgba(255,255,255,0.92)" : "rgba(10,13,19,0.85)";
-        g.font = `700 ${k.black ? fs * 0.85 : fs}px system-ui`;
-        g.textAlign = "center";
-        g.fillText(noteName(it.p, fifths, latin), x + w / 2, it.bot - 5);
-        g.textAlign = "left";
+        // El nombre se achica hasta entrar en la nota (Re♭ en una negra angosta).
+        const label = noteName(it.p, fifths, latin);
+        let size = k.black ? fs * 0.85 : fs;
+        g.font = `700 ${size}px system-ui`;
+        const tw = g.measureText(label).width;
+        if (tw > w - 3) { size *= (w - 3) / tw; g.font = `700 ${size}px system-ui`; }
+        if (size >= 7) {
+          g.fillStyle = k.black ? "rgba(255,255,255,0.92)" : "rgba(10,13,19,0.85)";
+          g.textAlign = "center";
+          g.fillText(label, x + w / 2, it.bot - 5);
+          g.textAlign = "left";
+        }
       }
       // Numero de dedo debajo de la nota (1 = pulgar ... 5 = meñique).
       if (fingers && it.finger && it.bot + 14 < hit) {
@@ -1607,7 +1783,7 @@ const roll = {
         g.globalAlpha = gl.a;
         g.fillRect(k.x, hit - bh, k.w, bh);
         // Destello en el punto de golpe.
-        const s = Math.max(ww * 3.4, 44);
+        const s = Math.max(ww * 2.2, 30);
         g.drawImage(this.sprite(gl.c), k.x + k.w / 2 - s / 2, hit - s / 2, s, s);
         g.globalAlpha = 1;
         // Chisporroteo suave mientras la nota sigue sonando.
@@ -1651,15 +1827,29 @@ const roll = {
       if (k.black) continue;
       const tn = tint(p);
       if (!tn) continue;
-      roundRect(g, k.x + 0.5, hit, k.w - 1, kbH - 1, Math.min(4, k.w / 4));
+      // Tecla blanca hundida: el color entra desde arriba y se aclara hacia
+      // abajo, con su sombra y una marca del color abajo (antes era un
+      // rectangulo plano que tapaba el borde de las vecinas).
+      const kr = Math.min(5, k.w / 4);
       g.globalAlpha = tn.a;
+      roundRect(g, k.x + 1, hit, k.w - 2, kbH - 2, kr);
       g.fillStyle = this.grad(`k${tn.c}`, () => {
         const pg = g.createLinearGradient(0, hit, 0, H);
-        pg.addColorStop(0, mix(tn.c, "#000000", 0.25));
-        pg.addColorStop(0.25, tn.c);
-        pg.addColorStop(1, mix(tn.c, "#ffffff", 0.35));
+        pg.addColorStop(0, mix(tn.c, "#000000", 0.1));
+        pg.addColorStop(0.45, mix(tn.c, "#ffffff", 0.35));
+        pg.addColorStop(1, mix(tn.c, "#ffffff", 0.78));
         return pg;
       });
+      g.fill();
+      g.fillStyle = this.grad("kdepth", () => {
+        const dg = g.createLinearGradient(0, hit, 0, hit + 16);
+        dg.addColorStop(0, "rgba(0,0,0,0.4)");
+        dg.addColorStop(1, "rgba(0,0,0,0)");
+        return dg;
+      });
+      g.fillRect(k.x + 1, hit, k.w - 2, 16);
+      roundRect(g, k.x + k.w * 0.22, H - 11, k.w * 0.56, 5, 2.5);
+      g.fillStyle = tn.c;
       g.fill();
       g.globalAlpha = 1;
       if (p % 12 === 0 && k.w > 14 && tn.a > 0.5) {
@@ -1679,12 +1869,18 @@ const roll = {
         g.drawImage(stat, k.x * dpr, (hit - 1) * dpr, k.w * dpr, (bkH + 1) * dpr, k.x, hit - 1, k.w, bkH + 1);
       }
       if (tn) {
-        roundRect(g, k.x, hit - 1, k.w, bkH, Math.min(3, k.w / 4));
+        roundRect(g, k.x + 0.5, hit - 1, k.w - 1, bkH, Math.min(3, k.w / 4));
         g.globalAlpha = tn.a;
-        g.fillStyle = mix(tn.c, "#000000", 0.15);
+        g.fillStyle = this.grad(`kb${tn.c}`, () => {
+          const bg = g.createLinearGradient(0, hit, 0, hit + bkH);
+          bg.addColorStop(0, mix(tn.c, "#000000", 0.45));
+          bg.addColorStop(0.7, mix(tn.c, "#000000", 0.1));
+          bg.addColorStop(1, mix(tn.c, "#ffffff", 0.25));
+          return bg;
+        });
         g.fill();
         g.globalAlpha = 1;
-        g.fillStyle = "rgba(255,255,255,0.07)";
+        g.fillStyle = "rgba(255,255,255,0.12)";
         g.fillRect(k.x + k.w * 0.2, hit + 2, k.w * 0.14, bkH * 0.72);
       }
     }
@@ -1698,13 +1894,30 @@ const roll = {
     g.fillRect(0, hit, W, 10);
 
     if (practice.waiting) {
+      // Cada tecla que falta tocar: se ilumina suave y tiene un punto que
+      // late (verde la que ya tocaste).
       const pulse = 0.55 + 0.45 * Math.sin(now / 160);
-      g.lineWidth = 3;
       for (const p of practice.required) {
         const k = keys[p];
         if (!k) continue;
-        g.strokeStyle = practice.got.has(p) ? "rgba(67,209,122,0.95)" : `rgba(242,181,68,${pulse})`;
-        g.strokeRect(k.x + 2, hit + 2, k.w - 4, (k.black ? bkH : kbH) - 4);
+        const ok = practice.got.has(p), c = ok ? "#43d17a" : "#f2b544";
+        const kh = k.black ? bkH : kbH;
+        if (!ok) {
+          g.globalAlpha = 0.22 * pulse;
+          roundRect(g, k.x + 1, hit, k.w - 2, kh - 2, Math.min(4, k.w / 4));
+          g.fillStyle = c;
+          g.fill();
+        }
+        const rr = Math.max(3, Math.min(8, k.w * 0.3));
+        g.globalAlpha = ok ? 1 : 0.5 + 0.5 * pulse;
+        g.beginPath();
+        g.arc(k.x + k.w / 2, hit + kh - rr - (k.black ? 6 : 16), rr * (ok ? 1 : 0.85 + 0.15 * pulse), 0, Math.PI * 2);
+        g.fillStyle = c;
+        g.fill();
+        g.lineWidth = 1.5;
+        g.strokeStyle = "rgba(0,0,0,0.35)";
+        g.stroke();
+        g.globalAlpha = 1;
       }
     }
 
@@ -2170,6 +2383,11 @@ const practice = {
       engine.setMix(100);
     }
     this.build();
+    // Como en las apps de piano: practicar es pantalla grande, solo las notas
+    // y el teclado. Al terminar se vuelve a como estaba.
+    this.autoFocus = !focusMode.on;
+    if (this.autoFocus) focusMode.toggle(true);
+    else focusMode.syncPractice();
     ui.practicePanel();
     await this.setSource(this.source);
   },
@@ -2187,6 +2405,9 @@ const practice = {
       engine.setMix(this.savedMix);
       this.savedMix = null;
     }
+    if (this.autoFocus && focusMode.on) focusMode.toggle(false);
+    this.autoFocus = false;
+    focusMode.syncPractice();
     ui.practicePanel();
   },
 
@@ -2416,6 +2637,7 @@ const ui = {
     $("#pMiss").textContent = P.misses;
     const tot = P.hits + P.misses;
     $("#pPct").textContent = tot ? Math.round((P.hits / tot) * 100) + "%" : "–";
+    $("#fScore").innerHTML = `<b>${P.hits}</b> bien · <b>${P.misses}</b> errores`;
     const latin = $("#optLatin").checked, fifths = player.keyNow().fifths;
     let html = "";
     if (!P.tracks().length) html = "Elegí arriba qué parte vas a tocar.";
@@ -2428,7 +2650,8 @@ const ui = {
     } else if (P.feedback) {
       html = `<span class="${P.feedback === "¡Bien!" ? "ok" : "bad"}">${P.feedback}</span>`;
     } else if (!engine.playing) {
-      html = "Dale ▶ (o espacio) y tocá las notas cuando lleguen a la línea.";
+      html = focusMode.touch ? "Tocá ▶ (o la pantalla) y tocá las notas cuando lleguen a la línea."
+        : "Dale ▶ (o espacio) y tocá las notas cuando lleguen a la línea.";
     }
     $("#pStatus").innerHTML = $("#fStatus").innerHTML = html;
   },
@@ -2454,6 +2677,13 @@ const ui = {
       sl.style.width = (Math.abs(b - L.a) / d) * 100 + "%";
     } else sl.hidden = true;
     sheet.follow();
+    if (focusMode.on) {
+      $("#fProgFill").style.width = pct + "%";
+      // Practicando y en pausa (no esperando una nota): pantalla oscura con
+      // un play grande en el medio, como en Artie.
+      const paused = practice.on && !engine.playing && !practice.waiting && $("#summary").hidden;
+      if (paused !== !$("#pauseOv").hidden) $("#pauseOv").hidden = !paused;
+    } else if (!$("#pauseOv").hidden) $("#pauseOv").hidden = true;
   },
 };
 
@@ -2462,6 +2692,11 @@ const ui = {
    ===================================================================== */
 const focusMode = {
   on: false, timer: null,
+  // iPad y celulares: la pantalla completa "de verdad" del navegador se sale
+  // sola al tocar la pantalla o al dar play (y con ella se salia de este modo).
+  // Ahi alcanza con esconder los menus; la app instalada ya no tiene barras.
+  touch: matchMedia("(hover: none) and (pointer: coarse)").matches
+    || (navigator.maxTouchPoints > 1 && /iPad|Macintosh/.test(navigator.userAgent)),
 
   fsElement() { return document.fullscreenElement || document.webkitFullscreenElement; },
 
@@ -2475,7 +2710,7 @@ const focusMode = {
     // En la app instalada del iPad no hace falta: ya no tiene barras.
     const el = document.documentElement;
     try {
-      if (v && !this.fsElement()) {
+      if (v && !this.fsElement() && !this.touch) {
         const r = (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
         if (r && r.catch) r.catch(() => {});
       } else if (!v && this.fsElement()) {
@@ -2484,13 +2719,22 @@ const focusMode = {
       }
     } catch { /* el navegador no lo permite: igual quedan ocultos los menus */ }
     this.syncView();
+    this.syncPractice();
     this.poke();
     requestAnimationFrame(() => roll.resize());
   },
 
+  // Practicando, la barra de arriba queda siempre a la vista (lo que hay que
+  // tocar, cómo vas, velocidad) y el cartel flotante no hace falta.
+  syncPractice() {
+    document.body.classList.toggle("practicing", this.on && practice.on);
+    $("#fExit").lastChild.textContent = practice.on ? " Terminar" : " Salir";
+    if (player.data) player.computeRange();
+  },
+
   // Muestra los controles y los vuelve a esconder si no se toca nada.
   poke() {
-    if (!this.on) return;
+    if (!this.on || practice.on) return;
     document.body.classList.remove("idle");
     clearTimeout(this.timer);
     this.timer = setTimeout(() => document.body.classList.add("idle"), 2600);
@@ -2502,11 +2746,16 @@ const focusMode = {
 
   init() {
     $("#focusBtn").onclick = () => this.toggle();
-    $("#fExit").onclick = () => this.toggle(false);
+    $("#fExit").onclick = () => (practice.on ? practice.stop(true) : this.toggle(false));
     $("#fPlay").onclick = () => engine.toggle();
+    $("#fSpDown").onclick = () => $("#spDown").click();
+    $("#poPlay").onclick = e => { e.stopPropagation(); engine.play(); };
+    $("#poExit").onclick = e => { e.stopPropagation(); practice.stop(true); };
+    $("#pauseOv").onclick = () => engine.play();
+    $("#fSpUp").onclick = () => $("#spUp").click();
     $$("#fView button").forEach(b => (b.onclick = () => { setView(b.dataset.view); this.syncView(); }));
     // Si se sale con Esc o el gesto del sistema, salir tambien del modo.
-    const onFs = () => { if (this.on && !this.fsElement()) this.toggle(false); };
+    const onFs = () => { if (this.on && !this.fsElement() && !this.touch) this.toggle(false); };
     document.addEventListener("fullscreenchange", onFs);
     document.addEventListener("webkitfullscreenchange", onFs);
     for (const ev of ["pointermove", "pointerdown", "keydown", "wheel"]) {
