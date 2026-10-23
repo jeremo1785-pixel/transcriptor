@@ -51,6 +51,7 @@
         <div>
           <h1>¿Qué tocamos hoy?</h1>
           <p>Elegí una canción y practicala con las notas cayendo.</p>
+          <span class="streak" id="streak" hidden></span>
         </div>
         <button id="newBtn" class="primary"><svg class="ic"><use href="#i-upload"/></svg> Agregar canción</button>
       </div>
@@ -127,6 +128,10 @@
             <div class="shelf-head"><div><h3>Seguí practicando</h3><span>Tus canciones</span></div></div>
             <div class="shelf-row"></div>
           </section>
+          <section class="shelf" id="shelfFav" hidden>
+            <div class="shelf-head"><div><h3>Favoritas</h3><span>Las que marcaste con el corazón</span></div></div>
+            <div class="shelf-row"></div>
+          </section>
           <div id="shelves"></div>
         </div>
         <div id="libMine" hidden>
@@ -194,7 +199,9 @@
             </div>
             <span id="fStatus" class="f-status"></span>
             <div class="f-prog"><i id="fProgFill"></i></div>
+            <span id="fLearn" class="f-learn" hidden></span>
             <span id="fScore" class="f-score"></span>
+            <button id="fSrc" class="f-src" title="Cómo te escucha la app"></button>
             <div class="f-speed" title="Velocidad">
               <button id="fSpDown" aria-label="Más lento">−</button><span id="fSpeed">100%</span><button id="fSpUp" aria-label="Más rápido">+</button>
             </div>
@@ -227,13 +234,26 @@
             </div>
           </div>
           <canvas id="roll"></canvas>
+          <!-- Aprender paso a paso: la cancion en partes y etapas. -->
+          <div class="song-intro" id="learnPanel" hidden>
+            <div class="ln-card">
+              <button class="icon si-x" id="lnClose" title="Volver"><svg class="ic"><use href="#i-x"/></svg></button>
+              <h2>Aprender paso a paso</h2>
+              <p class="si-meta" id="lnSub"></p>
+              <p class="ln-how">Cada parte: primero cada mano lento, después las dos juntas y al final a tempo.
+                Pasás de etapa con 90% de aciertos.</p>
+              <ol class="ln-path" id="lnPath"></ol>
+              <button class="si-go" id="lnGo"><svg class="ic fill"><use href="#i-play"/></svg> Empezar</button>
+            </div>
+          </div>
           <!-- Ficha de la cancion (estilo Artie): mano, nivel y «Practicar». -->
           <div class="song-intro" id="songIntro" hidden>
             <div class="si-card">
               <button class="icon si-x" id="siClose" title="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
               <div class="si-cover" id="siCover"></div>
               <div class="si-body">
-                <h2 id="siTitle"></h2>
+                <div class="si-head"><h2 id="siTitle"></h2>
+                  <button class="si-fav" id="siFav" title="Favorita"><svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.4-9.3-9.2C1.4 7.8 3.6 4.5 7 4.5c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 3.4 0 5.6 3.3 4.3 6.8-1.8 4.8-9.3 9.2-9.3 9.2z"/></svg></button></div>
                 <p id="siMeta" class="si-meta"></p>
                 <div id="siHandsBox">
                   <div class="si-label">¿Con qué mano tocás? <span>Tocá una mano para sumarla o sacarla</span></div>
@@ -251,7 +271,12 @@
                   </div>
                   <p class="si-who" id="siWho"></p>
                 </div>
-                <button class="si-go" id="siGo"><svg class="ic fill"><use href="#i-play"/></svg> Practicar</button>
+                <div class="si-label">¿Cómo te escucho?</div>
+                <div class="si-src" id="siSrc"></div>
+                <div class="si-actions">
+                  <button class="si-go" id="siGo"><svg class="ic fill"><use href="#i-play"/></svg> Practicar</button>
+                  <button class="si-learn" id="siLearn"><svg class="ic"><use href="#i-restart"/></svg> Aprender paso a paso</button>
+                </div>
                 <button class="link si-listen" id="siListen">Solo escuchar</button>
               </div>
             </div>
@@ -259,6 +284,7 @@
           <!-- Practica en pausa: play grande en el medio. -->
           <div class="pause-ov" id="pauseOv" hidden>
             <button id="poPlay" class="po-play" title="Seguir"><svg class="ic fill"><use href="#i-play"/></svg></button>
+            <p class="po-msg" id="poMsg"></p>
             <button id="poExit" class="po-exit">Terminar práctica</button>
           </div>
           <div id="sheetWrap" hidden>

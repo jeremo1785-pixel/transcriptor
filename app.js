@@ -521,6 +521,7 @@ const catalog = {
       ul.innerHTML = `<li class="cat-more">No se pudo cargar la biblioteca.</li>`;
       return;
     }
+    progress.refreshMap();
     // Sin buscar nada, primero las mas conocidas.
     if (!words.length) list.sort((a, b) => popularity(b) - popularity(a));
     void added;
@@ -603,6 +604,66 @@ async function addCatalogSong(file) {
    clásicos...) con portadas. Las portadas se dibujan aca mismo (colores y
    notas segun el nombre): no hay que bajar imagenes y andan sin internet.
    ===================================================================== */
+/* =====================================================================
+   Progreso: mejor puntaje de cada cancion, dias practicados (racha) y
+   favoritas. Queda guardado en este aparato.
+   ===================================================================== */
+function dayKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const progress = {
+  data: null,
+  load() {
+    if (!this.data) {
+      let v = null;
+      try { v = JSON.parse(localStorage.getItem("progress") || "null"); } catch { /* nada */ }
+      this.data = Object.assign({ songs: {}, days: [], fav: [] }, v || {});
+    }
+    return this.data;
+  },
+  save() { try { localStorage.setItem("progress", JSON.stringify(this.data)); } catch { /* nada */ } },
+  record(songId, pct) {
+    const D = this.load();
+    const s = D.songs[songId] || (D.songs[songId] = { best: 0, plays: 0 });
+    s.best = Math.max(s.best, pct);
+    s.plays++;
+    s.last = Date.now();
+    const t = dayKey(new Date());
+    if (!D.days.includes(t)) D.days.push(t);
+    if (D.days.length > 400) D.days = D.days.slice(-400);
+    this.save();
+    this.syncHead();
+  },
+  best(songId) { const s = this.load().songs[songId]; return s && s.plays ? s.best : null; },
+  last(songId) { return this.load().songs[songId]?.last || 0; },
+  // Dias seguidos practicando (si hoy todavia no, cuenta hasta ayer).
+  streak() {
+    const days = new Set(this.load().days), d = new Date();
+    if (!days.has(dayKey(d))) d.setDate(d.getDate() - 1);
+    let n = 0;
+    while (days.has(dayKey(d))) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  },
+  isFav(id) { return this.load().fav.includes(id); },
+  toggleFav(id) {
+    const D = this.load();
+    D.fav = D.fav.includes(id) ? D.fav.filter(x => x !== id) : [id, ...D.fav];
+    this.save();
+    return D.fav.includes(id);
+  },
+  // Puntaje de una obra de la biblioteca (por la cancion que se agrego de ella).
+  refreshMap() { this._map = catalog.added(); },
+  catBest(catId) { const sid = (this._map || {})[catId]; return sid ? this.best(sid) : null; },
+  syncHead() {
+    const el = $("#streak");
+    if (!el) return;
+    const n = this.streak();
+    el.hidden = !n;
+    el.innerHTML = n === 1 ? `🔥 Practicaste <b>hoy</b>: ¡seguí mañana!` : `🔥 <b>${n}</b> días seguidos practicando`;
+  },
+};
+
 // Clasicas mas conocidas, de la mas a la menos (parte del id de Mutopia).
 const FAMOUS = ["fur_elise_woo59", "bergamesq_clair", "satiee-gymnopedie_1", "chopin_nocturne_op9_n2",
   "joplins-entertainer", "wtk1-prelude1", "rondoallaturca", "kv545-k545-1", "chopin_valse_op64_no1",
@@ -644,13 +705,14 @@ function coverHtml(o, opts = {}) {
       <span class="cv-name">${initial}</span>
       ${o.level ? `<span class="cv-lvl l${o.level}">${LEVELS[o.level]}</span>` : ""}
       ${opts.badge ? `<span class="cv-badge">${esc(opts.badge)}</span>` : ""}
+      ${opts.score != null ? `<span class="cv-score">★ ${opts.score}%</span>` : ""}
       <span class="cv-play"><svg class="ic fill"><use href="#i-play"/></svg></span>
     </div>`;
 }
 
 function songCard(o) {
   return `<button class="song-card" data-id="${esc(o.id)}">
-      ${coverHtml(o, { badge: o.kind === "moderna" ? "Moderna" : o.kind === "pc" ? "Tuya" : "" })}
+      ${coverHtml(o, { score: progress.catBest(o.id), badge: o.kind === "moderna" ? "Moderna" : o.kind === "pc" ? "Tuya" : "" })}
       <span class="sc-t">${esc(o.title)}</span>
       <span class="sc-m">${esc(o.composer)} · ${fmtTime(o.dur)}</span>
     </button>`;
@@ -667,6 +729,7 @@ function popularity(o) {
 
 const shelves = {
   render() {
+    progress.refreshMap();
     const items = catalog.items || [];
     const box = $("#shelves");
     if (!box || !items.length) return;
@@ -708,16 +771,24 @@ const shelves = {
   renderMine(list) {
     const box = $("#shelfMine");
     if (!box) return;
-    const ready = list.filter(j => j.status === "ready").slice(0, 16);
-    box.hidden = !ready.length;
-    if (!ready.length) return;
-    $(".shelf-row", box).innerHTML = ready.map(j => `
+    // Las ultimas que practicaste primero.
+    const when = j => progress.last(j.id) || j.created || 0;
+    const all = list.filter(j => j.status === "ready").sort((a, b) => when(b) - when(a));
+    const card = j => `
       <button class="song-card mine" data-song="${esc(j.id)}">
-        ${coverHtml({ id: j.id, title: j.title, composer: "" }, { badge: j.mode === "partitura" ? "Partitura" : "Transcripta" })}
+        ${coverHtml({ id: j.id, title: j.title, composer: "" }, { badge: j.mode === "partitura" ? "Partitura" : "Transcripta", score: progress.best(j.id) })}
         <span class="sc-t">${esc(j.title)}</span>
         <span class="sc-m">${j.duration ? fmtTime(j.duration) : ""}</span>
-      </button>`).join("");
-    $$(".song-card", box).forEach(b => (b.onclick = () => (location.hash = `#/cancion/${b.dataset.song}`)));
+      </button>`;
+    const fill = (el, items) => {
+      el.hidden = !items.length;
+      $(".shelf-row", el).innerHTML = items.map(card).join("");
+      $$(".song-card", el).forEach(b => (b.onclick = () => (location.hash = `#/cancion/${b.dataset.song}`)));
+    };
+    fill(box, all.slice(0, 16));
+    const fav = $("#shelfFav");
+    if (fav) fill(fav, all.filter(j => progress.isFav(j.id)));
+    progress.syncHead();
   },
 };
 
@@ -1116,12 +1187,13 @@ const engine = {
       this.pause();           // sin grabacion, nadie avisa que termino
       return;
     }
-    if (practice.check(now)) return;
     const L = player.loop;
     if (L.a != null && L.b != null && now >= L.b) {
-      this.seek(L.a);
+      if (learn.on && practice.on) learn.onEnd();
+      else this.seek(L.a);
       return;
     }
+    if (practice.check(now)) return;
     const horizon = now + (player.view === "sheet" ? 0.6 : 0.18) * this.speed;
     const from = this.scheduledUntil;
     if (horizon <= from) return;
@@ -1462,6 +1534,157 @@ function applyLevels() {
    Ficha de la cancion (como en Artie): antes de practicar se elige que
    mano tocás y en que nivel, y un boton grande para empezar.
    ===================================================================== */
+/* =====================================================================
+   Aprender paso a paso (como los planetas de Artie): la cancion en partes
+   de 4 compases; cada parte, primero cada mano lento, despues las dos
+   juntas lento y al final a tempo. Se pasa de etapa con 90% de aciertos.
+   ===================================================================== */
+const learn = {
+  on: false, sec: 0, stage: 0, secs: [], savedSpeed: null,
+
+  stages() {
+    const hands = player.tracks.filter(t => t.hand != null).map(t => t.hand);
+    const S = [];
+    if (hands.includes(1)) S.push({ hand: "1", speed: 0.7, name: "Mano derecha, lento", short: "Der." });
+    if (hands.includes(0)) S.push({ hand: "0", speed: 0.7, name: "Mano izquierda, lento", short: "Izq." });
+    S.push({ hand: "both", speed: 0.7, name: hands.length > 1 ? "Las dos manos, lento" : "Lento", short: hands.length > 1 ? "Juntas" : "Lento" });
+    S.push({ hand: "both", speed: 1, name: "A tempo", short: "A tempo" });
+    return S;
+  },
+
+  sections() {
+    const d = player.data, db = d.downbeats && d.downbeats.length ? d.downbeats : [0];
+    const has = (a, b) => player.tracks.some(t => t.id !== "drums" && (t.allNotes || t.notes).some(n => n[0] >= a && n[0] < b));
+    const out = [];
+    for (let i = 0; i < db.length; i += 4) {
+      const a = db[i], b = i + 4 < db.length ? db[i + 4] : d.duration - 0.1;
+      if (b - a < 0.5 || !has(a, b)) continue;
+      out.push({ a, b, from: summary.barAt(a), to: summary.barAt(b - 0.01) });
+    }
+    return out;
+  },
+
+  load() { try { return JSON.parse(localStorage.getItem("learn:" + player.id) || "{}"); } catch { return {}; } },
+  saveDone(i, n) {
+    const s = this.load();
+    s[i] = Math.max(s[i] || 0, n);
+    try { localStorage.setItem("learn:" + player.id, JSON.stringify(s)); } catch { /* nada */ }
+  },
+  nextTodo() {
+    const s = this.load(), n = this.stages().length;
+    for (let i = 0; i < this.secs.length; i++) if ((s[i] || 0) < n) return [i, s[i] || 0];
+    return [0, 0];
+  },
+
+  open() {
+    this.secs = this.sections();
+    const S = this.stages(), done = this.load();
+    const [ni] = this.nextTodo();
+    const total = this.secs.length * S.length;
+    const ok = this.secs.reduce((m, _, i) => m + Math.min(S.length, done[i] || 0), 0);
+    $("#lnSub").textContent = `${this.secs.length} partes · ${ok} de ${total} etapas hechas`;
+    $("#lnPath").innerHTML = this.secs.map((sec, i) => {
+      const n = Math.min(S.length, done[i] || 0);
+      const cls = n >= S.length ? "done" : i === ni ? "cur" : "";
+      return `<li class="ln-sec ${cls}" data-i="${i}">
+        <span class="ln-dot">${n >= S.length ? "✓" : i + 1}</span>
+        <div class="ln-txt"><b>Parte ${i + 1}</b><small>Compases ${sec.from}–${sec.to}</small></div>
+        <div class="ln-stages">${S.map((st, k) => `<span class="${k < n ? "ok" : k === n && cls === "cur" ? "now" : ""}">${st.short}</span>`).join("")}</div>
+      </li>`;
+    }).join("");
+    $$("#lnPath .ln-sec").forEach(li => (li.onclick = () => {
+      const i = +li.dataset.i, n = Math.min(S.length - 1, done[i] || 0);
+      this.start(i, (done[i] || 0) >= S.length ? 0 : n);
+    }));
+    const [i, st] = this.nextTodo();
+    $("#lnGo").onclick = () => this.start(i, st);
+    $("#lnGo").lastChild.textContent = ok ? " Seguir" : " Empezar";
+    intro.hide();
+    $("#learnPanel").hidden = false;
+  },
+
+  start(i, st) {
+    const S = this.stages()[st], sec = this.secs[i];
+    if (!S || !sec) return;
+    $("#learnPanel").hidden = true;
+    intro.hide();
+    applyLevels();
+    if (this.savedSpeed == null) this.savedSpeed = +$("#speedSel").value;
+    this.on = true;
+    this.sec = i;
+    this.stage = st;
+    applyHands(S.hand);
+    setSpeed(S.speed);
+    const L = player.loop;
+    L.a = Math.max(0, sec.a - 0.3);
+    L.b = sec.b;
+    L.stage = 2;
+    $("#loopBtn").classList.add("on");
+    $("span", $("#loopBtn")).textContent = "Quitar bucle";
+    if (player.view !== "roll") setView("roll");
+    engine.pause();
+    engine.seek(L.a);
+    if (!practice.on) practice.start();
+    practice.hits = practice.misses = 0;
+    practice.finished = false;
+    this.label(`Parte ${i + 1} de ${this.secs.length} · ${S.name}`);
+    ui.practiceStatus();
+  },
+
+  label(t) {
+    $("#fLearn").textContent = t;
+    $("#fLearn").hidden = !t;
+    $("#poMsg").textContent = t;
+  },
+
+  // Llego al final de la parte: se mira como fue y se sigue (o se repite).
+  onEnd() {
+    const P = practice, tot = P.hits + P.misses, pct = tot ? P.hits / tot : 1;
+    engine.pause();
+    engine.seek(player.loop.a);
+    const S = this.stages();
+    if (pct >= 0.9 || tot === 0) {
+      if (tot) progress.record(player.id, Math.round(pct * 100));
+      this.saveDone(this.sec, this.stage + 1);
+      let i = this.sec, st = this.stage + 1;
+      if (st >= S.length) { i++; st = 0; }
+      if (i >= this.secs.length) {
+        toast("¡Aprendiste la canción entera! 🎉", 7000);
+        practice.stop(false);
+        return;
+      }
+      toast(`¡Bien! ${Math.round(pct * 100)}% · Ahora: ${i !== this.sec ? `parte ${i + 1}, ` : ""}${S[st].name.toLowerCase()}`, 5000);
+      this.start(i, st);
+    } else {
+      toast(`${Math.round(pct * 100)}% de aciertos: otra vez (hace falta 90%)`, 5000);
+      P.hits = P.misses = 0;
+      ui.practiceStatus();
+    }
+  },
+
+  stop() {
+    if (!this.on) return;
+    this.on = false;
+    const L = player.loop;
+    L.a = L.b = null;
+    L.stage = 0;
+    $("#loopBtn").classList.remove("on");
+    $("span", $("#loopBtn")).textContent = "Bucle";
+    if (this.savedSpeed != null) setSpeed(this.savedSpeed);
+    this.savedSpeed = null;
+    this.label("");
+  },
+};
+
+function setSpeed(v) {
+  const sel = $("#speedSel");
+  let best = 0;
+  [...sel.options].forEach((o, i) => { if (Math.abs(+o.value - v) < Math.abs(+sel.options[best].value - v)) best = i; });
+  sel.selectedIndex = best;
+  engine.setSpeed(+sel.value);
+  syncSpeed();
+}
+
 const intro = {
   sel: new Set([0, 1]),
 
@@ -1470,7 +1693,17 @@ const intro = {
     const d = player.data;
     $("#siCover").innerHTML = coverHtml({ id: player.id, title: d.title, composer: "" });
     $("#siTitle").textContent = d.title;
-    $("#siMeta").textContent = [fmtTime(d.duration), `${Math.round(d.bpm)} BPM`].join(" · ");
+    const best = progress.best(player.id);
+    $("#siMeta").textContent = [fmtTime(d.duration), `${Math.round(d.bpm)} BPM`, best != null ? `tu mejor: ${best}%` : ""].filter(Boolean).join(" · ");
+    $("#siFav").classList.toggle("on", progress.isFav(player.id));
+    // ¿Como te escucho? (antes habia que ir a «Más»): se recuerda la eleccion.
+    $("#siSrc").innerHTML = $$("#pSrc button").map(b =>
+      `<button data-src="${b.dataset.src}" class="${b.dataset.src === practice.source ? "on" : ""}">${b.textContent}</button>`).join("");
+    $$("#siSrc button").forEach(b => (b.onclick = () => {
+      practice.source = b.dataset.src;
+      try { localStorage.setItem("src", practice.source); } catch { /* nada */ }
+      $$("#siSrc button").forEach(x => x.classList.toggle("on", x === b));
+    }));
     $("#siHandsBox").hidden = hands.length < 2;
     this.sel = new Set(hands.filter(t => t.practice).map(t => t.hand));
     if (!this.sel.size) this.sel = new Set(hands.map(t => t.hand));
@@ -1512,6 +1745,9 @@ const intro = {
       practice.start();
     };
     $("#siListen").onclick = () => { this.hide(); engine.play(); };
+    $("#siLearn").onclick = () => learn.open();
+    $("#siFav").onclick = () => $("#siFav").classList.toggle("on", progress.toggleFav(player.id));
+    $("#lnClose").onclick = () => { $("#learnPanel").hidden = true; intro.show(); };
     $("#siClose").onclick = () => this.hide();
   },
 };
@@ -1606,6 +1842,17 @@ function setView(v) {
   if (v !== "sheet") $("#sheetNav").hidden = true;
   $("#sheetNamesBtn").hidden = $("#sheetChordsBtn").hidden = $("#sheetEasyBtn").hidden = v !== "sheet";
   if (v === "sheet") sheet.show();
+  syncSheetPractice();
+}
+
+// Practicando en la partitura (como Simply Piano / Flowkey): la partitura
+// arriba siguiendo lo que hay que tocar y el teclado abajo, con las teclas
+// que se esperan y las que tocás.
+function syncSheetPractice() {
+  const on = player.view === "sheet" && practice.on;
+  document.body.classList.toggle("sheet-practice", on);
+  $("#roll").hidden = player.view !== "roll" && !on;
+  requestAnimationFrame(() => roll.resize());
 }
 
 /* =====================================================================
@@ -1675,7 +1922,7 @@ const roll = {
   },
 
   resize() {
-    const r = $("#stage").getBoundingClientRect();
+    const r = this.canvas.getBoundingClientRect();
     this.dpr = window.devicePixelRatio || 1;
     this.w = r.width; this.h = r.height;
     this.canvas.width = Math.round(r.width * this.dpr);
@@ -1801,7 +2048,8 @@ const roll = {
   },
 
   draw() {
-    if (!player.data || player.view !== "roll" || $("#player").hidden) return;
+    const kbOnly = player.view === "sheet" && practice.on;
+    if (!player.data || (player.view !== "roll" && !kbOnly) || $("#player").hidden) return;
     const g = this.g, W = this.w, H = this.h;
     if (!W || !H) return;
     const now = performance.now();
@@ -1812,7 +2060,7 @@ const roll = {
 
     const t = engine.time();
     const pps = +$("#zoom").value;
-    const kbH = focusMode.on ? Math.max(90, Math.min(200, H * 0.22)) : Math.max(64, Math.min(130, H * 0.17));
+    const kbH = kbOnly ? H - 4 : focusMode.on ? Math.max(90, Math.min(200, H * 0.22)) : Math.max(64, Math.min(130, H * 0.17));
     const hit = H - kbH;
     const L = this.keyLayout(), { keys, ww } = L;
     const tTop = t + hit / pps;
@@ -2063,6 +2311,26 @@ const roll = {
         g.fillRect(k.x + k.w * 0.2, hit + 2, k.w * 0.14, bkH * 0.72);
       }
     }
+    // Notas que tocaste y no eran: un cartelito rojo que sube desde la tecla.
+    const gh = practice.ghosts;
+    for (let i = gh.length - 1; i >= 0; i--) {
+      const age = (now - gh[i].t) / 1000;
+      if (age >= 1) { gh.splice(i, 1); continue; }
+      const k = keys[gh[i].p];
+      if (!k) continue;
+      const bw = Math.max(k.w + 6, 30), y = hit - 30 - age * 50;
+      g.globalAlpha = 1 - age;
+      roundRect(g, k.x + k.w / 2 - bw / 2, y, bw, 22, 11);
+      g.fillStyle = "#ff5d73";
+      g.fill();
+      g.fillStyle = "#fff";
+      g.font = "700 12px system-ui";
+      g.textAlign = "center";
+      g.fillText(noteName(gh[i].p, fifths, latin, true), k.x + k.w / 2, y + 15);
+      g.textAlign = "left";
+      g.globalAlpha = 1;
+    }
+
     // Sombra de la linea de golpe sobre las teclas.
     g.fillStyle = this.grad("sombra", () => {
       const sh = g.createLinearGradient(0, hit, 0, hit + 10);
@@ -2353,6 +2621,7 @@ const summary = {
 
   show(finished) {
     const P = practice, tot = P.hits + P.misses;
+    if (tot) progress.record(player.id, Math.round((P.hits / tot) * 100));
     $("#sumTitle").textContent = finished ? "¡Terminaste!" : "Así te fue";
     $("#sumPct").textContent = tot ? Math.round((P.hits / tot) * 100) + "%" : "–";
     $("#sumHits").textContent = P.hits;
@@ -2409,7 +2678,12 @@ const summary = {
 };
 
 const practice = {
-  on: false, wait: true, hearMine: false, echo: false, source: "midi",
+  on: false, wait: true, hearMine: false, echo: false,
+  // Como te escucha: lo que elegiste la ultima vez; si no, teclado MIDI donde
+  // el navegador lo tiene y si no (Safari del iPad) el microfono.
+  source: (() => { try { return localStorage.getItem("src"); } catch { return null; } })()
+    || (navigator.requestMIDIAccess ? "midi" : "mic"),
+  ghosts: [], wrong: null,
   steps: [], idx: 0, waiting: false, hitNotes: new WeakSet(), startedAt: 0, finished: false,
   required: new Set(), got: new Set(), held: new Map(), flash: new Map(),
   recent: [], hits: 0, misses: 0, savedMix: null, feedback: "", device: "",
@@ -2500,7 +2774,7 @@ const practice = {
     this.got = new Set();
     ui.practiceStatus();
     // Llego al final de la cancion: resumen.
-    if (this.idx >= this.steps.length && this.steps.length && !this.finished) {
+    if (this.idx >= this.steps.length && this.steps.length && !this.finished && !learn.on) {
       this.finished = true;
       engine.pause();
       summary.show(true);
@@ -2533,6 +2807,7 @@ const practice = {
     // del acompanamiento darian errores falsos.
     const next = this.steps[this.idx + (this.required.size ? 1 : 0)];
     const early = next && next.pitches.has(p);
+    if (!early) this.ghost(p);
     if (!fromMic && !early && (this.waiting || !this.wait)) {
       this.misses++;
       const cur = this.steps[this.idx];
@@ -2541,6 +2816,23 @@ const practice = {
       this.flash.set(p, now + 350);
       ui.practiceStatus();
     }
+  },
+
+  // Una nota que no era: se marca en el teclado (sube un cartelito rojo) y
+  // se dice a cuanto quedo de la que habia que tocar.
+  ghost(p) {
+    const now = performance.now();
+    this.ghosts.push({ p, t: now });
+    if (this.ghosts.length > 12) this.ghosts.shift();
+    this.flash.set(p, now + 350);
+    const need = [...this.required].filter(q => !this.got.has(q));
+    if (!need.length) return;
+    const q = need.reduce((m, x) => (Math.abs(x - p) < Math.abs(m - p) ? x : m), need[0]);
+    const d = q - p, a = Math.abs(d);
+    const latin = $("#optLatin").checked, fifths = player.keyNow().fifths;
+    const dist = a === 1 ? "medio tono" : a === 2 ? "un tono" : a === 12 ? "una octava" : a > 12 ? "más de una octava" : `${a} teclas`;
+    this.wrong = { t: now, text: `tocaste ${noteName(p, fifths, latin, true)}: ${dist} más ${d > 0 ? "abajo" : "arriba"}` };
+    ui.practiceStatus();
   },
 
   noteOff(p) {
@@ -2581,6 +2873,7 @@ const practice = {
   // withSummary: al dejarla con el boton (no al cambiar de cancion), si ya
   // se toco un rato, se muestra el resumen.
   stop(withSummary = false) {
+    learn.stop();
     if (withSummary && !this.finished && this.hits + this.misses >= 8) summary.show(false);
     this.on = false;
     this.waiting = false;
@@ -2594,11 +2887,13 @@ const practice = {
     if (this.autoFocus && focusMode.on) focusMode.toggle(false);
     this.autoFocus = false;
     focusMode.syncPractice();
+    syncSheetPractice();
     ui.practicePanel();
   },
 
   async setSource(src) {
     this.source = src;
+    try { localStorage.setItem("src", src); } catch { /* nada */ }
     if (src === "midi") { this.stopMic(); await this.initMidi(); }
     else await this.initMic();
     ui.practicePanel();
@@ -2787,6 +3082,7 @@ const practice = {
     // (y fuerte: el golpe de cualquier tecla levanta un poco todos los graves)
     const byLower = p => [12, 19, 24].some(d => p - d >= 21 && !cand.has(p - d) && fundAttack(p - d)
       && fund[p - d] > sal[p] - 10);
+    let hit = false;
     for (const p of cand) {
       if (p < 21 || p > 108) continue;
       const v = sal[p];
@@ -2798,7 +3094,20 @@ const practice = {
         m.last.set(p, now);
         this.noteOn(p, true);
         setTimeout(() => this.held.delete(p), 220);
+        hit = true;
       }
+    }
+    // Ninguna de las esperadas: ¿sono otra nota clara? Se muestra (no cuenta
+    // como error: con el microfono podria ser un armonico).
+    if (!hit && this.waiting) {
+      let bestP = 0, bestV = -Infinity;
+      for (let p = 21; p <= 108; p++) {
+        if (cand.has(p) || sal[p] - floor < this.micSens + 8 || sal[p] <= bestV) continue;
+        if (!(sal[p] > Math.max(sal[p - 1], sal[p + 1]) + 3) || !attacked(p)) continue;
+        if (!(p < 48 || fundAttack(p)) || byApp(p) || byLower(p)) continue;
+        bestP = p; bestV = sal[p];
+      }
+      if (bestP && now - (m.last.get(bestP) || 0) > 400) { m.last.set(bestP, now); this.ghost(bestP); }
     }
     ui.micLevel(mx - floor);
   },
@@ -2825,6 +3134,9 @@ const ui = {
     $("#practiceBtn").lastChild.textContent = P.on ? " Dejar de practicar" : " Practicar";
     $$("#pSrc button").forEach(b => b.classList.toggle("on", b.dataset.src === P.source));
     $("#pDev").textContent = P.device || "";
+    const srcBtn = $$("#pSrc button").find(b => b.dataset.src === P.source);
+    $("#fSrc").innerHTML = `<svg class="ic"><use href="#i-${P.source === "mic" ? "mic" : "piano"}"/></svg> ${srcBtn ? srcBtn.textContent : ""}`;
+    $("#fSrc").title = P.device || "";
     $("#pMicRow").hidden = P.source !== "mic";
     $("#pEchoRow").hidden = P.source !== "midi";
     $("#pWait").checked = P.wait;
@@ -2858,6 +3170,7 @@ const ui = {
       const need = [...P.required].filter(p => !P.got.has(p)).sort((a, b) => a - b)
         .map(p => noteName(p, fifths, latin, true));
       html = `Tocá: <span class="need">${need.join(" + ")}</span>`;
+      if (P.wrong && performance.now() - P.wrong.t < 2500) html += ` <span class="bad">· ${P.wrong.text}</span>`;
     } else if (P.idx >= P.steps.length && P.steps.length) {
       html = `<span class="ok">¡Terminaste!</span>`;
     } else if (P.feedback) {
@@ -2971,6 +3284,24 @@ const focusMode = {
     $("#fExit").onclick = () => (practice.on ? practice.stop(true) : this.toggle(false));
     $("#fPlay").onclick = () => engine.toggle();
     $("#fSpDown").onclick = () => $("#spDown").click();
+    const prog = $(".f-prog");
+    const seekTo = e => {
+      const r = prog.getBoundingClientRect();
+      engine.seek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (player.data?.duration || 0));
+    };
+    prog.onpointerdown = e => {
+      e.stopPropagation();
+      this.wasPlaying = engine.playing;
+      engine.pause();
+      seekTo(e);
+      try { prog.setPointerCapture(e.pointerId); } catch { /* nada */ }
+      prog.onpointermove = seekTo;
+    };
+    prog.onpointerup = () => { prog.onpointermove = null; if (this.wasPlaying) engine.play(); };
+    $("#fSrc").onclick = () => {
+      const all = $$("#pSrc button").map(b => b.dataset.src);
+      practice.setSource(all[(all.indexOf(practice.source) + 1) % all.length]);
+    };
     const resume = e => { e.stopPropagation(); engine.play(); if (this.touch && !this.fsElement()) this.askFs(); };
     $("#poPlay").onclick = resume;
     $("#poExit").onclick = e => { e.stopPropagation(); practice.stop(true); };
