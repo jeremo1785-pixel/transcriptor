@@ -97,6 +97,9 @@
 
         // Practica: una tecla tocada tiene que registrarse.
         document.querySelector("#practiceBtn").click();
+        await sleep(200);
+        if (document.querySelector("#songIntro").hidden) fail("«Practicar» no abrió la ficha");
+        document.querySelector("#siGo").click();
         await sleep(400);
         A.practice.noteOn(60);
         if (!A.practice.held.has(60)) fail("la práctica no registró la tecla");

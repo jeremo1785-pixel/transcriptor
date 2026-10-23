@@ -1347,8 +1347,9 @@ async function openSong(id) {
   $("#loopBtn").classList.remove("on");
   setData(data);
   player.tracks = buildTracks(data.tracks);
+  loadLevels();
+  applyLevels();
   renderTracks();
-  computeFingers();
   syncHands();
   syncSpeed();
   player.computeRange();
@@ -1363,6 +1364,7 @@ async function openSong(id) {
   $("#tEnd").textContent = fmtTime(data.duration);
   sheet.invalidate();
   setView(player.view);
+  intro.show();
 }
 
 // Datos listos para mostrar: ajustes de tempo aplicados y manos del piano.
@@ -1397,6 +1399,122 @@ function buildTracks(tracks) {
   }
   return out;
 }
+
+/* =====================================================================
+   Niveles por mano, como en Artie: la misma cancion en Facil, Media y
+   Dificil (la original). Se arman de las notas: en cada acorde se deja la
+   nota de afuera (la melodia arriba en la derecha, el bajo en la izquierda).
+   ===================================================================== */
+const LEVEL_NAMES = ["", "Fácil", "Media", "Difícil"];
+
+function simplifyHand(notes, hand, level) {
+  if (level >= 3) return notes;
+  const out = [];
+  for (let i = 0; i < notes.length;) {
+    let j = i;
+    const group = [];
+    while (j < notes.length && notes[j][0] - notes[i][0] < 0.06) group.push(notes[j++]);
+    group.sort((a, b) => (hand === 1 ? b[2] - a[2] : a[2] - b[2]));   // la de afuera primero
+    out.push(group[0]);
+    // Media: acordes de hasta dos notas (la de afuera y la del otro extremo).
+    if (level === 2 && group.length > 1) out.push(group[group.length - 1]);
+    i = j;
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  if (level === 2 && hand === 1) return out;
+  // Facil: la derecha, la melodia sin adornos ni notas mas rapidas que una
+  // semicorchea; la izquierda, el bajo: una nota por pulso (en Media, cada
+  // medio pulso). Los acordes de un mismo golpe se quedan juntos.
+  const beat = 60 / (player.data?.bpm || 100);
+  const gap = hand === 1 ? Math.max(0.15, beat * 0.2) : beat * (level === 2 ? 0.45 : 0.9);
+  const easy = [];
+  let last = -Infinity;
+  for (const n of out) {
+    if (n[0] - last >= gap) { easy.push(n); last = n[0]; }
+    else if (n[0] - last < 0.06) easy.push(n);
+  }
+  return easy;
+}
+
+function loadLevels() {
+  player.levels = { 0: 3, 1: 3 };
+  try {
+    const v = JSON.parse(localStorage.getItem("lvl:" + player.id) || "null");
+    if (v && v[0] && v[1]) player.levels = v;
+  } catch { /* nada */ }
+}
+
+function applyLevels() {
+  for (const t of player.tracks) {
+    if (t.hand == null) continue;
+    t.allNotes = t.allNotes || t.notes;
+    t.notes = simplifyHand(t.allNotes, t.hand, player.levels[t.hand] || 3);
+    t.maxDur = t.notes.reduce((m, n) => Math.max(m, n[1] - n[0]), 0);
+  }
+  try { localStorage.setItem("lvl:" + player.id, JSON.stringify(player.levels)); } catch { /* nada */ }
+  computeFingers();
+  engine.stopVoices();
+  engine.scheduledUntil = engine.time();
+  if (practice.on) practice.build();
+}
+
+/* =====================================================================
+   Ficha de la cancion (como en Artie): antes de practicar se elige que
+   mano tocás y en que nivel, y un boton grande para empezar.
+   ===================================================================== */
+const intro = {
+  sel: new Set([0, 1]),
+
+  show() {
+    const hands = player.tracks.filter(t => t.hand != null);
+    const d = player.data;
+    $("#siCover").innerHTML = coverHtml({ id: player.id, title: d.title, composer: "" });
+    $("#siTitle").textContent = d.title;
+    $("#siMeta").textContent = [fmtTime(d.duration), `${Math.round(d.bpm)} BPM`].join(" · ");
+    $("#siHandsBox").hidden = hands.length < 2;
+    this.sel = new Set(hands.filter(t => t.practice).map(t => t.hand));
+    if (!this.sel.size) this.sel = new Set(hands.map(t => t.hand));
+    this.render();
+    $("#songIntro").hidden = false;
+  },
+
+  hide() { $("#songIntro").hidden = true; },
+
+  render() {
+    $$("#siHands .si-hand").forEach(b => {
+      const h = +b.dataset.h;
+      b.classList.toggle("on", this.sel.has(h));
+      $$(".si-lvl button", b).forEach(x => x.classList.toggle("on", +x.dataset.l === (player.levels[h] || 3)));
+      const tr = player.tracks.find(t => t.hand === h);
+      $(".si-n", b).textContent = tr ? `${simplifyHand(tr.allNotes || tr.notes, h, player.levels[h] || 3).length} notas` : "";
+    });
+    const both = this.sel.size === 2;
+    $("#siWho").textContent = both ? "Tocás con las dos manos" : this.sel.has(1) ? "Tocás la derecha; la app toca la izquierda" : "Tocás la izquierda; la app toca la derecha";
+  },
+
+  init() {
+    $$("#siHands .si-hand").forEach(b => (b.onclick = e => {
+      const h = +b.dataset.h;
+      const lv = e.target.closest(".si-lvl button");
+      if (lv) {
+        player.levels[h] = +lv.dataset.l;
+        this.sel.add(h);
+      } else if (this.sel.has(h) && this.sel.size > 1) this.sel.delete(h);
+      else this.sel.add(h);
+      this.render();
+    }));
+    $("#siGo").onclick = () => {
+      applyLevels();
+      const hands = player.tracks.filter(t => t.hand != null);
+      if (hands.length) applyHands(this.sel.size === 2 ? "both" : String([...this.sel][0]));
+      this.hide();
+      if (player.view !== "roll") setView("roll");
+      practice.start();
+    };
+    $("#siListen").onclick = () => { this.hide(); engine.play(); };
+    $("#siClose").onclick = () => this.hide();
+  },
+};
 
 function setData(data) {
   player.data = data;
@@ -2963,11 +3081,11 @@ function initPlayer() {
   $("#practiceBtn").onclick = () => {
     if (practice.on) practice.stop(true);
     else {
-      if (player.view !== "roll") setView("roll");
       $("#side").classList.remove("open");
-      practice.start();
+      intro.show();
     }
   };
+  intro.init();
   $("#pClose").onclick = () => practice.stop(true);
   $("#sumClose").onclick = () => summary.hide();
   $("#sumAgain").onclick = () => summary.again();
@@ -3119,6 +3237,7 @@ function route() {
   } else {
     engine.pause();
     if (focusMode.on) focusMode.toggle(false);
+    intro.hide();
     $("#player").hidden = true;
     $("#home").hidden = false;
     refreshJobs();

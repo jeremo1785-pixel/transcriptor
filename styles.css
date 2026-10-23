@@ -630,3 +630,48 @@ body.focus.practicing .f-prog { display: block; position: absolute; left: 0; rig
 .po-exit { border: 1px solid var(--line2); background: rgba(14,17,24,.9); color: var(--text); border-radius: 999px;
   padding: 10px 22px; font-weight: 600; font-size: 15px; }
 .po-exit:active { background: rgba(255,255,255,.1); }
+
+/* ---------------------------------------------------------------- ficha de la cancion (estilo Artie) */
+.song-intro { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px;
+  background: radial-gradient(800px 500px at 30% 20%, rgba(123,140,255,.18), transparent 60%), rgba(6,7,11,.92);
+  animation: fadeIn .25s var(--ease); overflow: auto; }
+.si-card { position: relative; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 32px; align-items: center;
+  width: min(860px, 100%); }
+.si-x { position: absolute; top: -6px; right: -6px; z-index: 2; }
+.si-cover .cover { aspect-ratio: 1; border-radius: 22px; overflow: hidden; position: relative;
+  box-shadow: 0 30px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.1) inset; }
+.si-cover .cover svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.si-cover .cv-play, .si-cover .cv-name { display: none; }
+.si-body h2 { margin: 0; font-size: 28px; line-height: 1.15; letter-spacing: -0.02em; }
+.si-meta { margin: 6px 0 18px; color: var(--muted); }
+.si-label { font-weight: 650; margin-bottom: 10px; }
+.si-label span { color: var(--faint); font-weight: 400; font-size: 13px; margin-left: 6px; }
+.si-hands { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.si-hand { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 10px 12px; cursor: pointer;
+  border-radius: 18px; border: 1.5px solid var(--line2); background: rgba(255,255,255,.03); opacity: .55;
+  transition: opacity .2s, border-color .2s, background .2s, transform .15s var(--ease); -webkit-tap-highlight-color: transparent; }
+.si-hand:active { transform: scale(.98); }
+.si-hand.on { opacity: 1; }
+.si-hand.left.on { border-color: #ff8a3d; background: rgba(255,138,61,.1); }
+.si-hand.right.on { border-color: #4f8cff; background: rgba(79,140,255,.1); }
+.si-hand .hand { width: 46px; height: 46px; stroke-width: 1.6; }
+.si-hand.left .hand { color: #ff8a3d; } .si-hand.right .hand { color: #4f8cff; }
+.ic.flipx { transform: scaleX(-1); }
+.si-hand b { font-size: 15px; }
+.si-n { color: var(--muted); font-size: 12px; min-height: 16px; }
+.si-lvl { display: flex; gap: 2px; padding: 3px; margin-top: 6px; border-radius: 999px; background: rgba(0,0,0,.35); }
+.si-lvl button { border: 0; background: transparent; color: var(--muted); font-size: 12.5px; font-weight: 600;
+  padding: 6px 10px; border-radius: 999px; }
+.si-lvl button.on { background: rgba(255,255,255,.14); color: var(--text); }
+.si-who { color: var(--muted); font-size: 13px; margin: 10px 0 0; text-align: center; }
+.si-go { margin-top: 20px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 15px; border: 0; border-radius: 16px; font-size: 18px; font-weight: 700; color: #fff;
+  background: linear-gradient(140deg, var(--accent), var(--accent2)); box-shadow: 0 14px 36px rgba(123,140,255,.4); }
+.si-go .ic { width: 20px; height: 20px; }
+.si-go:active { transform: scale(.98); }
+.si-listen { display: block; margin: 12px auto 0; }
+@media (max-width: 760px) {
+  .si-card { grid-template-columns: 1fr; gap: 18px; }
+  .si-cover { width: 150px; margin: 0 auto; }
+  .si-body h2 { font-size: 22px; text-align: center; } .si-meta { text-align: center; }
+}
