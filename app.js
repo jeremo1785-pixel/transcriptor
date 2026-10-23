@@ -3083,6 +3083,9 @@ const practice = {
     const byLower = p => [12, 19, 24].some(d => p - d >= 21 && !cand.has(p - d) && fundAttack(p - d)
       && fund[p - d] > sal[p] - 10);
     let hit = false;
+    const okSet = new Set();
+    let salMax = -Infinity;
+    for (let p = 21; p <= 108; p++) if (sal[p] > salMax) salMax = sal[p];
     for (const p of cand) {
       if (p < 21 || p > 108) continue;
       const v = sal[p];
@@ -3090,7 +3093,11 @@ const practice = {
       // De Do3 para arriba el piano tiene fundamental: tiene que sonar ella (si
       // no, un armonico compartido con otra nota parecia esta tecla).
       const fundOk = p < 48 || fundAttack(p);
-      if (attacked(p) && own && fundOk && now - (m.last.get(p) || 0) > (p < 48 ? 450 : 250) && !byApp(p) && !byLower(p)) {
+      // Dos cuadros seguidos (el piano se queda en la tecla; la voz pasa de largo).
+      const okNow = attacked(p) && own && fundOk && !byApp(p) && !byLower(p);
+      const okBefore = p < 48 || (m.okPrev && m.okPrev.has(p));   // los graves tardan: alcanza con uno
+      if (okNow) okSet.add(p);
+      if (okNow && okBefore && now - (m.last.get(p) || 0) > (p < 48 ? 450 : 250)) {
         m.last.set(p, now);
         this.noteOn(p, true);
         setTimeout(() => this.held.delete(p), 220);
@@ -3099,16 +3106,33 @@ const practice = {
     }
     // Ninguna de las esperadas: ¿sono otra nota clara? Se muestra (no cuenta
     // como error: con el microfono podria ser un armonico).
-    if (!hit && this.waiting) {
+    m.okPrev = okSet;
+    // Exigente, para que la voz o el ruido no aparezcan como notas: tiene que
+    // ser lo mas fuerte que suena, bien por encima del ruido, cerca (menos de
+    // una octava) de la que habia que tocar y quedarse en la misma tecla
+    // varios cuadros seguidos (la voz cambia de altura todo el tiempo).
+    if (!hit && this.waiting && this.required.size) {
+      const req = [...this.required];
       let bestP = 0, bestV = -Infinity;
       for (let p = 21; p <= 108; p++) {
-        if (cand.has(p) || sal[p] - floor < this.micSens + 8 || sal[p] <= bestV) continue;
-        if (!(sal[p] > Math.max(sal[p - 1], sal[p + 1]) + 3) || !attacked(p)) continue;
-        if (!(p < 48 || fundAttack(p)) || byApp(p) || byLower(p)) continue;
+        if (cand.has(p) || sal[p] - floor < this.micSens + 14 || sal[p] < salMax - 3 || sal[p] <= bestV) continue;
+        if (!req.some(q => Math.abs(q - p) <= 12)) continue;
+        if (!(sal[p] > Math.max(sal[p - 1], sal[p + 1]) + 6)) continue;
+        if (!(p < 48 || fund[p] - floor > this.micSens + 6) || byApp(p) || byLower(p)) continue;
         bestP = p; bestV = sal[p];
       }
-      if (bestP && now - (m.last.get(bestP) || 0) > 400) { m.last.set(bestP, now); this.ghost(bestP); }
-    }
+      const pend = m.pend;
+      if (bestP && pend && pend.p === bestP) pend.n++;
+      else m.pend = bestP ? { p: bestP, n: 1, attack: attacked(bestP) } : null;
+      const P2 = m.pend;
+      if (m.lock && sal[m.lock] - floor < this.micSens + 4) m.lock = 0;   // ya se apago: puede volver a marcarse
+      if (P2 && P2.n >= 4 && P2.attack && P2.p !== m.lock && now - (m.last.get(P2.p) || 0) > 600) {
+        m.last.set(P2.p, now);
+        m.lock = P2.p;
+        m.pend = null;
+        this.ghost(P2.p);
+      }
+    } else m.pend = null;
     ui.micLevel(mx - floor);
   },
 };
