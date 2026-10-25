@@ -737,3 +737,15 @@ body.sheet-practice #roll { top: auto; bottom: 0; height: 150px; }
 
 .si-head { padding-right: 40px; }
 body.sheet-practice .sheet-nav { bottom: 164px; }
+
+/* Partitura con piano: franja de compases y paginas justo arriba del teclado. */
+body.sheet-practice #sheetWrap { bottom: 194px; padding-bottom: 12px; }
+body.sheet-practice .sheet-nav { left: 0; right: 0; bottom: 150px; transform: none; height: 44px; border-radius: 0;
+  border: 0; border-top: 1px solid rgba(255,255,255,.06); justify-content: flex-end; padding: 0 12px; gap: 8px;
+  background: #0d1017 !important; box-shadow: none; }
+body.sheet-practice .sheet-nav span { margin-right: auto; color: var(--muted); font-size: 13.5px; }
+
+/* Sin practicar (con los controles de abajo a la vista), teclado mas bajo: mas lugar para leer. */
+body.sheet-practice:not(.practicing) #roll { height: 120px; }
+body.sheet-practice:not(.practicing) #sheetWrap { bottom: 164px; }
+body.sheet-practice:not(.practicing) .sheet-nav { bottom: 120px; }

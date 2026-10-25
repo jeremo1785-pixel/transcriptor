@@ -515,6 +515,16 @@ const catalog = {
         $("#catKind").hidden = $("#catModNote").hidden = !mod.length;
       }
     } catch { /* sin modernas */ }
+    // Latinas y argentinas (tango, folclore, bolero, rock nacional...), tambien de PDMX.
+    try {
+      const r = await fetch("biblioteca/latina.json");
+      if (r.ok) {
+        const lat = await r.json();
+        for (const o of lat) o.kind = "latina";
+        this.items = lat.concat(this.items);
+        if (lat.length) $("#catKind").hidden = $("#catModNote").hidden = false;
+      }
+    } catch { /* sin latinas */ }
     await this.loadShared();
     $("#catCount").textContent = this.items.length ? `· ${this.items.length}` : "";
     const comps = [...new Set(this.items.map(o => o.composer))].sort((a, b) => a.localeCompare(b));
@@ -662,14 +672,27 @@ const progress = {
       let v = null;
       try { v = JSON.parse(localStorage.getItem("progress") || "null"); } catch { /* nada */ }
       this.data = Object.assign({ songs: {}, days: [], fav: [] }, v || {});
+      // Los puntajes de antes (hasta el 25/10/2026) se guardaban tambien de
+      // partes sueltas y sin saber con que manos o velocidad: quedan como
+      // «anteriores», no como el mejor de la cancion.
+      for (const s of Object.values(this.data.songs)) {
+        if (!s.v) { if (s.best != null) s.old = s.best; delete s.best; s.v = 2; }
+      }
     }
     return this.data;
   },
-  save() { try { localStorage.setItem("progress", JSON.stringify(this.data)); } catch { /* nada */ } },
-  record(songId, pct) {
-    const D = this.load();
-    const s = D.songs[songId] || (D.songs[songId] = { best: 0, plays: 0 });
-    s.best = Math.max(s.best, pct);
+  save() {
+    try { localStorage.setItem("progress", JSON.stringify(this.data)); } catch {
+      if (!this.warned) {
+        this.warned = true;
+        toast("No se pudo guardar tu progreso en este aparato (¿navegación privada o sin espacio?).", 8000);
+      }
+    }
+  },
+  song(songId) { const D = this.load(); return D.songs[songId] || (D.songs[songId] = { plays: 0, v: 2 }); },
+  // Practicaste (cuenta para la racha y para «seguí practicando»; no es puntaje).
+  practiced(songId) {
+    const D = this.load(), s = this.song(songId);
     s.plays++;
     s.last = Date.now();
     const t = dayKey(new Date());
@@ -678,7 +701,20 @@ const progress = {
     this.save();
     this.syncHead();
   },
-  best(songId) { const s = this.load().songs[songId]; return s && s.plays ? s.best : null; },
+  // r = { full: tocaste la cancion entera, acc: % de precision, cover: % de notas tocadas, ctx }.
+  // Solo una cancion completa puede ser «tu mejor»; con que manos, nivel, velocidad y fuente.
+  record(songId, r) {
+    this.practiced(songId);
+    if (!r.full) return;
+    const s = this.song(songId);
+    if (s.best == null || r.acc > s.best) { s.best = r.acc; s.bestCtx = r.ctx; s.bestAt = Date.now(); }
+    this.save();
+  },
+  best(songId) { const s = this.load().songs[songId]; return s && s.best != null ? s.best : null; },
+  oldBest(songId) { return this.load().songs[songId]?.old ?? null; },
+  // Donde quedaste: posicion, manos, niveles, velocidad, vista y etapa de «Aprender».
+  setResume(songId, data) { this.song(songId).resume = data; this.save(); },
+  resume(songId) { return this.load().songs[songId]?.resume || null; },
   last(songId) { return this.load().songs[songId]?.last || 0; },
   // Dias seguidos practicando (si hoy todavia no, cuenta hasta ayer).
   streak() {
@@ -755,7 +791,7 @@ function coverHtml(o, opts = {}) {
 
 function songCard(o) {
   return `<button class="song-card" data-id="${esc(o.id)}">
-      ${coverHtml(o, { score: progress.catBest(o.id), badge: o.kind === "moderna" ? "Moderna" : o.kind === "pc" ? "Tuya" : "" })}
+      ${coverHtml(o, { score: progress.catBest(o.id), badge: o.kind === "moderna" ? "Moderna" : o.kind === "latina" ? (o.style || "Latina") : o.kind === "pc" ? "Tuya" : "" })}
       <span class="sc-t">${esc(o.title)}</span>
       <span class="sc-m">${esc(o.composer)} · ${fmtTime(o.dur)}</span>
     </button>`;
@@ -765,7 +801,7 @@ function songCard(o) {
 // las clasicas por la lista de arriba.
 function popularity(o) {
   if (o.kind === "pc") return 1000 + o.sent / 1e10;      // las tuyas, primero
-  if (o.kind === "moderna") return Math.log10((o.views || 0) + 10) * 10;
+  if (o.kind === "moderna" || o.kind === "latina") return Math.log10((o.views || 0) + 10) * 10;
   const i = FAMOUS.findIndex(f => o.id.includes(f));
   return i < 0 ? 0 : 70 - i;
 }
@@ -792,6 +828,12 @@ const shelves = {
       ["Para empezar", "Fáciles y conocidas", easy, { level: 1 }],
       ["Clásicos imprescindibles", "Las obras que todos conocen", cla.slice(0, 16), { kind: "clasica" }],
     ];
+    const lat = byPop.filter(o => o.kind === "latina");
+    if (lat.length) {
+      rows.push(["Latinas y argentinas", "Rock nacional, bolero, pop latino, cumbia…", lat.filter(o => !/Tango|Folclore/.test(o.style)).slice(0, 16), { kind: "latina" }]);
+      const tf = lat.filter(o => /Tango|Folclore/.test(o.style));
+      if (tf.length) rows.push(["Tango y folclore", "Piazzolla, Gardel, zambas, chacareras…", tf.slice(0, 16), { kind: "latina" }]);
+    }
     if (mod.length) {
       rows.push(["Pop, películas y juegos", "Arreglos para piano", mod.filter(o => o.level <= 2).slice(0, 16), { kind: "moderna" }]);
     }
@@ -1608,9 +1650,10 @@ const learn = {
   },
 
   load() { try { return JSON.parse(localStorage.getItem("learn:" + player.id) || "{}"); } catch { return {}; } },
-  saveDone(i, n) {
+  saveDone(i, n, skipped = false) {
     const s = this.load();
     s[i] = Math.max(s[i] || 0, n);
+    if (skipped) (s.skipped || (s.skipped = {}))[`${i}:${n - 1}`] = true;
     try { localStorage.setItem("learn:" + player.id, JSON.stringify(s)); } catch { /* nada */ }
   },
   nextTodo() {
@@ -1682,13 +1725,22 @@ const learn = {
 
   // Llego al final de la parte: se mira como fue y se sigue (o se repite).
   onEnd() {
-    const P = practice, tot = P.hits + P.misses, pct = tot ? P.hits / tot : 1;
+    const P = practice, tot = P.hits + P.misses, L = player.loop;
+    // Notas de esta parte para la mano elegida: cuantas tocaste (cobertura) y
+    // con cuantos errores (precision). Sin tocar nada no se aprueba.
+    const secSteps = P.steps.filter(st => st.t >= L.a && st.t < L.b);
+    const cover = secSteps.length ? secSteps.filter(st => st.ok).length / secSteps.length : 0;
+    const acc = tot ? P.hits / tot : 0;
+    const pct = Math.min(cover, acc);
     engine.pause();
-    engine.seek(player.loop.a);
+    engine.seek(L.a);
     const S = this.stages();
-    if (pct >= 0.9 || tot === 0) {
-      if (tot) progress.record(player.id, Math.round(pct * 100));
-      this.saveDone(this.sec, this.stage + 1);
+    const empty = !secSteps.length;
+    if (empty || (cover >= 0.9 && acc >= 0.9)) {
+      if (empty) toast("Esta parte no tiene notas para esa mano: se saltea (no cuenta como aprendida).", 5000);
+      else progress.practiced(player.id);
+      this.saveDone(this.sec, this.stage + 1, empty);
+      practice.saveResume();
       let i = this.sec, st = this.stage + 1;
       if (st >= S.length) { i++; st = 0; }
       if (i >= this.secs.length) {
@@ -1696,10 +1748,12 @@ const learn = {
         practice.stop(false);
         return;
       }
-      toast(`¡Bien! ${Math.round(pct * 100)}% · Ahora: ${i !== this.sec ? `parte ${i + 1}, ` : ""}${S[st].name.toLowerCase()}`, 5000);
+      if (!empty) toast(`¡Bien! ${Math.round(pct * 100)}% · Ahora: ${i !== this.sec ? `parte ${i + 1}, ` : ""}${S[st].name.toLowerCase()}`, 5000);
       this.start(i, st);
     } else {
-      toast(`${Math.round(pct * 100)}% de aciertos: otra vez (hace falta 90%)`, 5000);
+      toast(tot ? `Tocaste ${Math.round(cover * 100)}% de las notas con ${Math.round(acc * 100)}% de precisión: otra vez (hace falta 90%)`
+        : "No se registró ninguna nota: otra vez.", 5000);
+      for (const st of secSteps) { st.ok = false; st.errors = 0; }
       P.hits = P.misses = 0;
       ui.practiceStatus();
     }
@@ -1736,8 +1790,10 @@ const intro = {
     const d = player.data;
     $("#siCover").innerHTML = coverHtml({ id: player.id, title: d.title, composer: "" });
     $("#siTitle").textContent = d.title;
-    const best = progress.best(player.id);
-    $("#siMeta").textContent = [fmtTime(d.duration), `${Math.round(d.bpm)} BPM`, best != null ? `tu mejor: ${best}%` : ""].filter(Boolean).join(" · ");
+    const best = progress.best(player.id), old = progress.oldBest(player.id), bc = progress.load().songs[player.id]?.bestCtx;
+    const ctx = bc ? ` (${[bc.hands, bc.speed < 1 ? Math.round(bc.speed * 100) + "%" : "", bc.source === "mic" ? "micrófono" : ""].filter(Boolean).join(", ")})` : "";
+    $("#siMeta").textContent = [fmtTime(d.duration), `${Math.round(d.bpm)} BPM`,
+      best != null ? `tu mejor: ${best}%${ctx}` : old != null ? `antes: ${old}%` : ""].filter(Boolean).join(" · ");
     $("#siFav").classList.toggle("on", progress.isFav(player.id));
     // ¿Como te escucho? (antes habia que ir a «Más»): se recuerda la eleccion.
     $("#siSrc").innerHTML = $$("#pSrc button").map(b =>
@@ -1892,7 +1948,7 @@ function setView(v) {
 // arriba siguiendo lo que hay que tocar y el teclado abajo, con las teclas
 // que se esperan y las que tocás.
 function syncSheetPractice() {
-  const on = player.view === "sheet" && practice.on;
+  const on = player.view === "sheet";
   document.body.classList.toggle("sheet-practice", on);
   $("#roll").hidden = player.view !== "roll" && !on;
   requestAnimationFrame(() => roll.resize());
@@ -2091,7 +2147,7 @@ const roll = {
   },
 
   draw() {
-    const kbOnly = player.view === "sheet" && practice.on;
+    const kbOnly = player.view === "sheet";
     if (!player.data || (player.view !== "roll" && !kbOnly) || $("#player").hidden) return;
     const g = this.g, W = this.w, H = this.h;
     if (!W || !H) return;
@@ -2529,7 +2585,12 @@ const sheet = {
         let rt;
         new ResizeObserver(() => {
           clearTimeout(rt);
-          rt = setTimeout(() => { if (this.key && player.view === "sheet") this.renderPage(this.page, true); }, 250);
+          rt = setTimeout(() => {
+            if (!this.key || player.view !== "sheet") return;
+            this.measureMap();                     // otro tamaño: otras paginas
+            this.page = -1;
+            this.syncPage(true);
+          }, 250);
         }).observe($("#sheetWrap"));
       }
       this.osmd.EngravingRules.ChordSymbolTextHeight = 2.4;
@@ -2568,10 +2629,29 @@ const sheet = {
     }
   },
 
-  // Compases por pagina segun el ancho: unas 3 o 4 lineas que entran sin scroll.
+  // Compases por renglon (4, o 3 si la musica es muy densa o la pantalla angosta)
+  // y renglones que entran arriba del teclado: notas grandes y sin scroll.
+  layout() {
+    const wrap = $("#sheetWrap"), w = wrap.clientWidth || 900, h = wrap.clientHeight || 600;
+    const ms = this.osmd.Sheet.SourceMeasures;
+    const notes = player.tracks.reduce((n, t) => n + (t.allNotes || t.notes).length, 0);
+    const dense = notes / Math.max(1, ms.length) > 14;
+    const perLine = w < 600 ? 2 : w < 900 || dense ? 3 : 4;
+    // Lo mas grande posible, pero que entren al menos dos renglones si se puede.
+    let zoom = w < 600 ? 0.8 : w < 900 ? 0.95 : 1.1, lines = 1;
+    for (; ; zoom -= 0.05) {
+      lines = Math.max(1, Math.floor((h - 90) / (230 * zoom)));   // 230: alto medido de un renglon de piano con cifrado
+      if (lines >= 2 || zoom <= 0.85) break;
+    }
+    // Si ni chiquitas entran dos, mejor un renglon grande.
+    if (lines < 2) zoom = w < 600 ? 0.8 : w < 900 ? 0.95 : 1.1;
+    return { perLine, zoom: Math.round(zoom * 100) / 100, lines };
+  },
+
   perPage() {
-    const w = $("#sheetWrap").clientWidth || 900;
-    return w >= 1100 ? 16 : w >= 800 ? 12 : 8;
+    const L = this.layout();
+    this.lay = L;
+    return L.perLine * L.lines;
   },
 
   pageAt(t) {
@@ -2595,6 +2675,10 @@ const sheet = {
       drawFromMeasureNumber: ms[pg.from].MeasureNumber,
       drawUpToMeasureNumber: ms[pg.to].MeasureNumber,
     });
+    const L = this.lay || this.layout();
+    this.osmd.EngravingRules.RenderXMeasuresPerLineAkaSystem = L.perLine;
+    this.osmd.EngravingRules.StretchLastSystemLine = true;     // todos los renglones del mismo ancho
+    this.osmd.zoom = L.zoom;
     this.osmd.render();
     this.osmd.cursor.show();
     this.page = p;
@@ -2602,7 +2686,7 @@ const sheet = {
     if (!keepScroll) $("#sheetWrap").scrollTop = 0;
     const nav = $("#sheetNav");
     nav.hidden = this.pages.length < 2;
-    $("#pgInfo").textContent = `Página ${p + 1} de ${this.pages.length}`;
+    $("#pgInfo").textContent = `Compases ${ms[pg.from].MeasureNumber}–${ms[pg.to].MeasureNumber} · Página ${p + 1} de ${this.pages.length}`;
     $("#pgPrev").disabled = p === 0;
     $("#pgNext").disabled = p === this.pages.length - 1;
   },
@@ -2664,7 +2748,12 @@ const summary = {
 
   show(finished) {
     const P = practice, tot = P.hits + P.misses;
-    if (tot) progress.record(player.id, Math.round((P.hits / tot) * 100));
+    const okSteps = P.steps.filter(st => st.ok).length;
+    const cover = P.steps.length ? okSteps / P.steps.length : 0;
+    // Solo cuenta como la cancion entera si se llego al final, sin bucle y
+    // tocando casi todas las notas (si se salto con la barra, no).
+    const full = finished && player.loop.a == null && cover >= 0.9;
+    if (tot) progress.record(player.id, { full, acc: Math.round((P.hits / tot) * 100), cover: Math.round(cover * 100), ctx: P.context() });
     $("#sumTitle").textContent = finished ? "¡Terminaste!" : "Así te fue";
     $("#sumPct").textContent = tot ? Math.round((P.hits / tot) * 100) + "%" : "–";
     $("#sumHits").textContent = P.hits;
@@ -2915,7 +3004,25 @@ const practice = {
 
   // withSummary: al dejarla con el boton (no al cambiar de cancion), si ya
   // se toco un rato, se muestra el resumen.
+  // Con que se practico (queda junto al puntaje).
+  context() {
+    const hs = player.tracks.filter(t => t.hand != null && t.practice).map(t => t.hand);
+    return {
+      hands: hs.length === 2 ? "ambas" : hs[0] === 1 ? "derecha" : hs[0] === 0 ? "izquierda" : "",
+      levels: { ...(player.levels || {}) }, speed: +$("#speedSel").value, source: this.source, wait: this.wait,
+    };
+  },
+
+  saveResume() {
+    if (!player.id || !player.data) return;
+    progress.setResume(player.id, {
+      t: Math.round(engine.time() * 10) / 10, ...this.context(), view: player.view,
+      learn: learn.on ? { sec: learn.sec, stage: learn.stage } : null, at: Date.now(),
+    });
+  },
+
   stop(withSummary = false) {
+    if (this.on) this.saveResume();
     learn.stop();
     if (withSummary && !this.finished && this.hits + this.misses >= 8) summary.show(false);
     this.on = false;
@@ -3644,7 +3751,7 @@ function route() {
 }
 
 // Para la prueba de humo (humo.js) y para diagnosticar desde la consola.
-window.__app = { player, engine, sheet, practice, roll, setView, focusMode, piano, summary };
+window.__app = { player, engine, sheet, practice, roll, setView, focusMode, piano, summary, progress, learn };
 
 (async function main() {
   initPlayer();
