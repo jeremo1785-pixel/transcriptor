@@ -1,6 +1,6 @@
 // Service worker: guarda la app y los modelos en el iPad para que funcione
 // sin internet despues de la primera vez.
-const VERSION = "v29";
+const VERSION = "v30";
 const SHELL = `transcriptor-app-${VERSION}`;
 const MODELS = "transcriptor-modelos-v1";   // los modelos pesados, aparte: no se rebajan en cada version
 
@@ -50,15 +50,21 @@ self.addEventListener("fetch", e => {
       if (hit) return hit;
       return fetch(e.request);
     }
-    // Resto: red primero (para recibir actualizaciones) y cache si no hay conexion.
-    try {
-      const net = await fetch(e.request);
-      if (net.ok) (await caches.open(SHELL)).put(e.request, net.clone());
-      return net;
-    } catch {
-      const hit = await caches.match(e.request, { ignoreSearch: true });
-      if (hit) return hit;
-      throw new Error("Sin conexión y sin copia guardada");
+    // Resto: red primero (para recibir actualizaciones), pero si la red tarda mas
+    // de 3 s y ya hay una copia guardada, se usa la copia (la red sigue y la
+    // actualiza para la proxima). Con internet lento la app abria en 30 s.
+    const net = fetch(e.request).then(async r => {
+      if (r.ok) await (await caches.open(SHELL)).put(e.request, r.clone());
+      return r;
+    });
+    e.waitUntil(net.catch(() => {}));
+    const hit = await caches.match(e.request, { ignoreSearch: true });
+    if (!hit) {
+      try { return await net; } catch { throw new Error("Sin conexión y sin copia guardada"); }
     }
+    return Promise.race([
+      net.then(r => (r.ok ? r : hit)).catch(() => hit),
+      new Promise(res => setTimeout(() => res(hit), 3000)),
+    ]);
   })());
 });

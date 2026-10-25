@@ -627,32 +627,20 @@ const catalog = {
   load() { return this._p || (this._p = this._load()); },
 
   async _load() {
-    try {
-      this.items = await (await fetch("biblioteca/biblioteca.json")).json();
-    } catch {
-      this.items = [];
-    }
-    for (const o of this.items) o.kind = o.kind || "clasica";
-    // Modernas (PDMX): solo existen en la PC; en el iPad no estan y no pasa nada.
-    try {
-      const r = await fetch("biblioteca/moderna.json");
-      if (r.ok) {
-        const mod = await r.json();
-        for (const o of mod) o.kind = "moderna";
-        this.items = mod.concat(this.items);
-        $("#catKind").hidden = $("#catModNote").hidden = !mod.length;
-      }
-    } catch { /* sin modernas */ }
-    // Latinas y argentinas (tango, folclore, bolero, rock nacional...), tambien de PDMX.
-    try {
-      const r = await fetch("biblioteca/latina.json");
-      if (r.ok) {
-        const lat = await r.json();
-        for (const o of lat) o.kind = "latina";
-        this.items = lat.concat(this.items);
-        if (lat.length) $("#catKind").hidden = $("#catModNote").hidden = false;
-      }
-    } catch { /* sin latinas */ }
+    // Las listas se piden todas a la vez (con internet lento, una detras de
+    // otra tardaba la suma de todas).
+    const get = async (f, kind) => {
+      try {
+        const r = await fetch("biblioteca/" + f);
+        if (!r.ok) return [];
+        const list = await r.json();
+        for (const o of list) o.kind = o.kind || kind;
+        return list;
+      } catch { return []; }
+    };
+    const [cla, mod, lat] = await Promise.all([get("biblioteca.json", "clasica"), get("moderna.json", "moderna"), get("latina.json", "latina")]);
+    this.items = lat.concat(mod, cla);
+    if (mod.length || lat.length) $("#catKind").hidden = $("#catModNote").hidden = false;
     await this.loadShared();
     $("#catCount").textContent = this.items.length ? `· ${this.items.length}` : "";
     const comps = [...new Set(this.items.map(o => o.composer))].sort((a, b) => a.localeCompare(b));
@@ -677,8 +665,13 @@ const catalog = {
   },
 
   async refreshShared() {
-    if (!this.items) return;
-    if (!(await this.loadShared())) return;
+    // Un solo pedido a la vez y como mucho uno por minuto (antes se pedia cada
+    // vez que la app volvia a verse y, con internet lento, se amontonaban).
+    if (!this.items || this._sharing || Date.now() - (this._sharedAt || 0) < 60000) return;
+    this._sharing = true;
+    let changed = false;
+    try { changed = await this.loadShared(); } finally { this._sharing = false; this._sharedAt = Date.now(); }
+    if (!changed) return;
     $("#catCount").textContent = `· ${this.items.length}`;
     if (!$("#libHome").hidden) shelves.render();
     if (!$("#libCat").hidden) this.render();
@@ -1046,7 +1039,7 @@ const shelves = {
     const easy = byPop.filter(o => o.level === 1).slice(0, 16);
     const pcs = items.filter(o => o.kind === "pc").sort((a, b) => b.sent - a.sent);
     const rows = [
-      ...(pcs.length ? [["Desde tu PC", "Las que mandaste con el botón «iPad»", pcs.slice(0, 20), { kind: "pc" }]] : []),
+      ...(pcs.length ? [["Desde tu PC", "Las que mandaste con el botón «iPad»", pcs.slice(0, 60), { kind: "pc" }]] : []),
       ["Populares", "Las que más se tocan", pop, { kind: "" }],
       ["Para empezar", "Fáciles y conocidas", easy, { level: 1 }],
       ["Clásicos imprescindibles", "Las obras que todos conocen", cla.slice(0, 16), { kind: "clasica" }],
