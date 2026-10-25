@@ -46,6 +46,7 @@
       <button data-lib="mine">Mis canciones</button>
       <button data-lib="cat">Explorar <small id="catCount"></small></button>
     </nav>
+    <button id="ytPasteBtn" class="top-new yt" title="Copiá el link en YouTube (Compartir › Copiar enlace) y tocá acá"><svg class="ic"><use href="#i-link"/></svg> Pegar de YouTube</button>
     <button id="newBtn" class="top-new"><svg class="ic"><use href="#i-upload"/></svg> Agregar canción</button>
   </header>
 
@@ -68,6 +69,7 @@
           <button data-src="file" class="on"><svg class="ic"><use href="#i-folder"/></svg> Archivo</button>
           <button data-src="score"><svg class="ic"><use href="#i-sheet"/></svg> Partitura</button>
           <button data-src="mic"><svg class="ic"><use href="#i-mic"/></svg> Grabar</button>
+          <button data-src="yt"><svg class="ic"><use href="#i-link"/></svg> YouTube</button>
         </div>
 
         <div class="src-pane" data-src="file">
@@ -93,6 +95,14 @@
             ves las notas cayendo, practicás y la escuchás con el piano de la app.
             Los <b>PDF</b> los lee tu PC por el Wi-Fi: tiene que estar abierto el Transcriptor
             de la PC («Transcriptor (iPad).bat»); tarda uno o dos minutos.</p>
+        </div>
+
+        <div class="src-pane" data-src="yt" hidden>
+          <textarea id="ytUrl" class="text yt-links" rows="3" placeholder="Pegá un link de YouTube, varios (uno por línea) o el link de una lista de reproducción tuya"></textarea>
+          <p class="hint">Lo transcribe <b>tu PC</b> por el Wi-Fi: tiene que estar abierto el Transcriptor de la PC
+            («Transcriptor (iPad).bat»). Tarda unos minutos; podés cerrar esta ventana o la app y la canción
+            aparece sola en «Mis canciones» cuando esté. Anda mejor con videos de <b>piano solo</b>: buscá
+            «nombre de la canción piano cover» o «piano tutorial».</p>
         </div>
 
         <div class="src-pane" data-src="mic" hidden>
@@ -149,6 +159,7 @@
         </div>
         <div id="libMine" hidden>
           <input type="file" id="backupInput" accept=".json,application/json" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
+          <p class="pc-pending" id="pcPendingNote" hidden></p>
           <ul id="jobs" class="jobs"></ul>
           <div class="backup-box">
             <b>Tu progreso</b>

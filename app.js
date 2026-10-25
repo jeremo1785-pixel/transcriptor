@@ -135,6 +135,10 @@ async function initHome() {
   syncHomeMode();
   catalog.init();
   newSheet.init();
+  // Lo que se le pidio a la PC y quedo pendiente (se cerro la app mientras trabajaba).
+  pc.checkPending();
+  pc.watch();
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") pc.checkPending(); });
   backup.init();
 
   // Lo que quedo a medias (se cerro la app mientras procesaba) se retoma solo.
@@ -160,8 +164,8 @@ function setScore(f) {
 // Con una partitura no hay nada que elegir: se importa tal cual.
 function syncHomeMode() {
   const score = home.src === "score" || (home.src === "file" && isScoreFile(home.file));
-  $("#modesBox").hidden = score || home.modes.length < 2;   // solo piano: nada que elegir
-  $("#goBtn").textContent = score ? "Importar partitura" : "Transcribir";
+  $("#modesBox").hidden = score || home.src === "yt" || home.modes.length < 2;   // solo piano: nada que elegir
+  $("#goBtn").textContent = score ? "Importar partitura" : home.src === "yt" ? "Transcribir en la PC" : "Transcribir";
 }
 
 async function toggleRecording() {
@@ -240,48 +244,155 @@ async function importPackage(file) {
   return meta.title;
 }
 
-// Los PDF son una imagen de la partitura: para pasarlos a notas hace falta
-// Audiveris, que esta en la PC. El iPad le manda el PDF a la PC por el Wi-Fi
-// (tiene que estar abierto el Transcriptor de la PC) y se trae el resultado.
+// Lo que el iPad solo no puede hacer lo hace la PC por el Wi-Fi (tiene que estar
+// abierto el Transcriptor de la PC): leer PDF (Audiveris) y transcribir videos
+// de YouTube. Se le manda el pedido y se trae el resultado. Si la app se cierra
+// mientras la PC trabaja, el pedido queda anotado y se trae al volver.
 const PC_ADDR = "https://192.168.1.30:8443";
-async function pdfViaPc(file) {
-  let base = PC_ADDR;
-  try { base = (localStorage.getItem("pcAddr") || PC_ADDR).replace(/\/$/, ""); } catch { /* nada */ }
-  const say = t => { const el = $("#newMsg"); if (el) { el.className = "msg"; el.textContent = t; } };
-  const call = async (path, opts = {}, ms = 8000) => {
+const pc = {
+  base() {
+    try { return (localStorage.getItem("pcAddr") || PC_ADDR).replace(/\/$/, ""); } catch { return PC_ADDR; }
+  },
+  async call(path, opts = {}, ms = 8000, base = this.base()) {
     const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
     try {
       const r = await fetch(base + path, { ...opts, signal: ctl.signal });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
       return r;
     } finally { clearTimeout(tm); }
-  };
-  say("Buscando la PC…");
-  let cfg;
-  try { cfg = await (await call("/api/config")).json(); } catch {
-    throw new Error(`Los PDF los lee tu PC. Abrí el Transcriptor de la PC («Transcriptor (iPad).bat»). `
-      + `Si es la primera vez, abrí ${base} en Safari y aceptá el aviso; después volvé a elegir el PDF.`);
-  }
+  },
+  async config(what) {
+    try { return await (await this.call("/api/config")).json(); } catch {
+      throw new Error(`${what} lo hace tu PC. Abrí el Transcriptor de la PC («Transcriptor (iPad).bat»). `
+        + `Si es la primera vez, abrí ${this.base()} en Safari y aceptá el aviso; después volvé a intentar.`);
+    }
+  },
+  say(t) { const el = $("#newMsg"); if (el) { el.className = "msg"; el.textContent = t; } },
+
+  pending() { try { return JSON.parse(localStorage.getItem("pcPending") || "[]"); } catch { return []; } },
+  setPending(list) {
+    try { localStorage.setItem("pcPending", JSON.stringify(list)); } catch { /* nada */ }
+    const el = $("#pcPendingNote");
+    if (el) {
+      el.hidden = !list.length;
+      el.textContent = `Tu PC está transcribiendo ${list.length} ${list.length === 1 ? "canción" : "canciones"} de YouTube: `
+        + "van a ir apareciendo acá (tiene que estar abierto el Transcriptor de la PC).";
+    }
+  },
+  // Mientras haya pedidos, se mira cada 20 s si alguno termino.
+  watch() {
+    this.setPending(this.pending());
+    if (this.timer || !this.pending().length) return;
+    this.timer = setInterval(() => {
+      if (!this.pending().length) { clearInterval(this.timer); this.timer = null; return; }
+      if (document.visibilityState === "visible") this.checkPending();
+    }, 20000);
+  },
+
+  // Espera a que la PC termine y trae la cancion.
+  async waitAndImport(jobId, doing, base = this.base()) {
+    for (let i = 0; ; i++) {
+      if (i > 1200) throw new Error("La PC tardó demasiado.");
+      await new Promise(r => setTimeout(r, 2000));
+      let j;
+      try { j = await (await this.call(`/api/jobs/${jobId}`, {}, 8000, base)).json(); } catch { continue; }
+      if (j.status === "ready") break;
+      if (j.status === "error") {
+        this.setPending(this.pending().filter(p => p.id !== jobId));
+        throw new Error("La PC no pudo: " + (j.error || ""));
+      }
+      this.say(`${doing}… ${j.stage ? j.stage + " · " : ""}${Math.round((j.progress || 0) * 100)}%`);
+    }
+    this.say("Trayendo la canción…");
+    const blob = await (await this.call(`/api/jobs/${jobId}/package`, {}, 120000, base)).blob();
+    const title = await importPackage(new File([blob], "pc.transcriptor"));
+    this.setPending(this.pending().filter(p => p.id !== jobId));
+    return { id: importPackage.lastId, title };
+  },
+
+  // Al abrir la app (o volver a ella): ¿quedo algo pedido a la PC que ya esta listo?
+  async checkPending() {
+    if (this.checking) return;
+    this.checking = true;
+    try {
+      for (const p of this.pending()) {
+        let j;
+        try { j = await (await this.call(`/api/jobs/${p.id}`, {}, 5000, p.base)).json(); } catch (e) {
+          if (/existe/i.test(e.message)) this.setPending(this.pending().filter(x => x.id !== p.id));
+          continue;
+        }
+        if (j.status === "ready") {
+          const blob = await (await this.call(`/api/jobs/${p.id}/package`, {}, 120000, p.base)).blob();
+          const title = await importPackage(new File([blob], "pc.transcriptor"));
+          this.setPending(this.pending().filter(x => x.id !== p.id));
+          toast(`Llegó «${title}» desde la PC.`, 6000);
+          refreshJobs();
+        } else if (j.status === "error") {
+          this.setPending(this.pending().filter(x => x.id !== p.id));
+          toast("La PC no pudo transcribir un video: " + (j.error || ""), 7000);
+        }
+      }
+    } finally { this.checking = false; }
+  },
+};
+
+async function pdfViaPc(file) {
+  pc.say("Buscando la PC…");
+  const cfg = await pc.config("Leer un PDF");
   if (!cfg.pdf) throw new Error("La PC no tiene el lector de PDF (Audiveris).");
-  say("Mandando el PDF a la PC…");
+  pc.say("Mandando el PDF a la PC…");
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("title", file.name.replace(/\.pdf$/i, ""));
   form.append("mode", "piano");
-  const job = await (await call("/api/jobs/upload", { method: "POST", body: form }, 120000)).json();
-  for (let i = 0; ; i++) {
-    if (i > 480) throw new Error("La PC tardó demasiado en leer el PDF.");
-    await new Promise(r => setTimeout(r, 1500));
-    let j;
-    try { j = await (await call(`/api/jobs/${job.id}`)).json(); } catch { continue; }
-    if (j.status === "ready") break;
-    if (j.status === "error") throw new Error("La PC no pudo leer el PDF: " + (j.error || ""));
-    say(`La PC está leyendo el PDF… ${Math.round((j.progress || 0) * 100)}% (puede tardar un par de minutos)`);
+  const job = await (await pc.call("/api/jobs/upload", { method: "POST", body: form }, 120000)).json();
+  return pc.waitAndImport(job.id, "La PC está leyendo el PDF");
+}
+
+// Varios videos o una lista de reproduccion que armaste vos: se le mandan todos
+// a la PC y van llegando a medida que se terminan (no se espera a cada uno).
+const YT_RX = /^https?:\/\/(www\.|m\.|music\.)?(youtube\.com|youtu\.be)\//i;
+async function ytBatchViaPc(lines) {
+  const bad = lines.filter(l => !YT_RX.test(l));
+  if (bad.length) throw new Error(`Eso no es un link de YouTube: ${bad[0]}`);
+  pc.say("Buscando la PC…");
+  await pc.config("Transcribir videos de YouTube");
+  const urls = [];
+  for (const l of lines) {
+    if (/youtube\.com\/playlist|[?&]list=/.test(l)) {
+      pc.say("Leyendo la lista de reproducción…");
+      const r = await (await pc.call(`/api/youtube/lista?url=${encodeURIComponent(l)}`, {}, 60000)).json();
+      for (const it of r.items || []) urls.push(it.url);
+    } else urls.push(l);
   }
-  say("Trayendo la partitura…");
-  const blob = await (await call(`/api/jobs/${job.id}/package`, {}, 120000)).blob();
-  const title = await importPackage(new File([blob], "pdf.transcriptor"));
-  return { id: importPackage.lastId, title };
+  const uniq = [...new Set(urls)].slice(0, 100);
+  if (!uniq.length) throw new Error("La lista está vacía o es privada (tiene que ser pública o «no listada»).");
+  let n = 0;
+  for (const url of uniq) {
+    pc.say(`Mandando a la PC… ${n + 1} de ${uniq.length}`);
+    const job = await (await pc.call("/api/jobs/youtube", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, mode: "piano" }),
+    }, 30000)).json();
+    pc.setPending([...pc.pending(), { id: job.id, base: pc.base(), at: Date.now() }]);
+    n++;
+  }
+  pc.watch();
+  return n;
+}
+
+// Un video de YouTube (mejor un «piano cover»): lo transcribe la PC.
+async function ytViaPc(url) {
+  if (!/^https?:\/\/(www\.|m\.|music\.)?(youtube\.com|youtu\.be)\//i.test(url)) {
+    throw new Error("Pegá un link de YouTube (empieza con https://youtu.be/ o https://www.youtube.com/).");
+  }
+  pc.say("Buscando la PC…");
+  await pc.config("Transcribir un video de YouTube");
+  pc.say("Mandando el link a la PC…");
+  const job = await (await pc.call("/api/jobs/youtube", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, mode: "piano" }),
+  }, 30000)).json();
+  pc.setPending([...pc.pending(), { id: job.id, base: pc.base(), at: Date.now() }]);
+  return pc.waitAndImport(job.id, "La PC está transcribiendo (podés cerrar la app: la canción llega sola después)");
 }
 
 // Canciones mandadas desde la PC a GitHub (compartidas/): solo las notas,
@@ -325,6 +436,22 @@ async function submitNew() {
   msg.textContent = "";
   btn.disabled = true;
   try {
+    if (home.src === "yt") {
+      const lines = $("#ytUrl").value.split(/\s+/).map(x => x.trim()).filter(Boolean);
+      if (!lines.length) throw new Error("Pegá el link de YouTube primero.");
+      if (lines.length === 1 && !/[?&]list=/.test(lines[0])) {
+        const t = await ytViaPc(lines[0]);
+        $("#ytUrl").value = "";
+        msg.textContent = `«${t.title}» lista. Ya está en «Mis canciones».`;
+      } else {
+        const n = await ytBatchViaPc(lines);
+        $("#ytUrl").value = "";
+        msg.textContent = `Le mandé ${n} ${n === 1 ? "video" : "videos"} a la PC. Van a ir llegando solos a «Mis canciones» `
+          + "a medida que se terminan (cada uno tarda unos minutos; podés cerrar la app).";
+      }
+      refreshJobs();
+      return;
+    }
     const scoreFile = home.src === "score" ? home.scoreFile : isScoreFile(home.file) ? home.file : null;
     if (home.src === "score" && !scoreFile) throw new Error("Elegí una partitura primero");
     if (scoreFile) {
@@ -895,6 +1022,8 @@ function songCard(o) {
 function popularity(o) {
   if (o.kind === "pc") return 1000 + o.sent / 1e10;      // las tuyas, primero
   if (o.kind === "moderna" || o.kind === "latina") return Math.log10((o.views || 0) + 10) * 10;
+  // Clasicas sacadas de PDMX (Claro de luna, Canon...): tambien por vistas, arriba de las demas.
+  if (o.views) return 20 + Math.log10(o.views + 10) * 10;
   const i = FAMOUS.findIndex(f => o.id.includes(f));
   return i < 0 ? 0 : 70 - i;
 }
@@ -990,9 +1119,29 @@ function libTab(name) {
 // una ventana aparte (antes ocupaba media pantalla de inicio).
 const newSheet = {
   open() { $("#newModal").hidden = false; },
+  // Ir a la pestaña YouTube de la ventana.
+  youtube() {
+    this.open();
+    $("#srcTabs [data-src=yt]").click();
+  },
   close() { $("#newModal").hidden = true; },
   init() {
     $("#newBtn").onclick = () => this.open();
+    // «Pegar de YouTube»: lo mas facil desde el iPad. En YouTube: Compartir ›
+    // Copiar enlace; aca: un toque. Lee el link copiado y se lo manda a la PC.
+    $("#ytPasteBtn").onclick = async () => {
+      let text = "";
+      try { text = await navigator.clipboard.readText(); } catch { /* el navegador no dejo leer */ }
+      const links = (text.match(/https?:\/\/\S+/g) || []).filter(l => YT_RX.test(l));
+      this.youtube();
+      if (!links.length) {
+        $("#ytUrl").focus();
+        pc.say("No encontré un link de YouTube copiado. En YouTube tocá Compartir › Copiar enlace y después «Pegar de YouTube» (o pegalo acá).");
+        return;
+      }
+      $("#ytUrl").value = links.join("\n");
+      $("#goBtn").click();
+    };
     $("#newClose").onclick = () => this.close();
     $("#newModal").addEventListener("pointerdown", e => { if (e.target.id === "newModal") this.close(); });
     // Al mandar algo: se cierra y se ve en «Mis canciones» (o se abre).

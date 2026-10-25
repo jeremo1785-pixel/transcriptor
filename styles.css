@@ -872,3 +872,10 @@ body.focus.practicing.sheet-practice .f-need { bottom: 260px !important; }
 .backup-btns { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .side .backup-box { margin-top: 0; }
 .side .backup-box > b { display: none; }
+.yt-links { width: 100%; resize: vertical; min-height: 84px; font-family: inherit; }
+.pc-pending { margin: 0 0 12px; padding: 10px 14px; border-radius: 12px; background: rgba(79,140,255,.1);
+  border: 1px solid rgba(79,140,255,.35); color: #c7d8ff; font-size: 14px; }
+.top-new.yt { border-color: rgba(255,80,80,.6); color: #ff9b9b; margin-left: auto; }
+.top-new.yt:hover { background: rgba(255,80,80,.1); }
+.top-new.yt + .top-new { margin-left: 0; }
+@media (max-width: 900px) { .top-new.yt { font-size: 0; padding: 8px 10px; } .top-new.yt .ic { font-size: 15px; } }
