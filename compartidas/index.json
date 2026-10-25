@@ -1,5 +1,40 @@
 [
 {
+"id": "e1cc630937df",
+"title": "Mozart - Sonata facile K545 (leída de un PDF)",
+"mode": "partitura",
+"sent": 1792967044,
+"duration": 29.2
+},
+{
+"id": "39cdc665c6f8",
+"title": "Chopin Nocturne No. 20 perf. by Wladyslaw Szpilman - \"The Pianist\" - Original Recording",
+"mode": "banda",
+"sent": 1792967043,
+"duration": 219.64
+},
+{
+"id": "a3edc2b5c3c0",
+"title": "Beethoven - Moonlight Sonata (1st Movement)",
+"mode": "banda",
+"sent": 1792967043,
+"duration": 444.89
+},
+{
+"id": "cfbf9a0abc3d",
+"title": "Yiruma - River Flows In You | VERY EASY Piano Tutorial",
+"mode": "banda",
+"sent": 1792967042,
+"duration": 195.81
+},
+{
+"id": "1426f74a5153",
+"title": "Yiruma - River Flows In You | VERY EASY Piano Tutorial",
+"mode": "piano",
+"sent": 1792967041,
+"duration": 195.81
+},
+{
 "id": "9e5408d725c5",
 "title": "Charly García - Desarma y Sangra Piano Cover por Candela Juarez",
 "mode": "piano",
