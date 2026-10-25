@@ -235,7 +235,52 @@ async function importPackage(file) {
     created: Date.now(), duration: d.duration, key: d.key?.label, bpm: d.bpm, imported: true,
     tracks: d.tracks.map(t => ({ id: t.id, label: t.label, count: t.notes.length })),
   });
+  importPackage.lastId = id;
   return meta.title;
+}
+
+// Los PDF son una imagen de la partitura: para pasarlos a notas hace falta
+// Audiveris, que esta en la PC. El iPad le manda el PDF a la PC por el Wi-Fi
+// (tiene que estar abierto el Transcriptor de la PC) y se trae el resultado.
+const PC_ADDR = "https://192.168.1.30:8443";
+async function pdfViaPc(file) {
+  let base = PC_ADDR;
+  try { base = (localStorage.getItem("pcAddr") || PC_ADDR).replace(/\/$/, ""); } catch { /* nada */ }
+  const say = t => { const el = $("#newMsg"); if (el) { el.className = "msg"; el.textContent = t; } };
+  const call = async (path, opts = {}, ms = 8000) => {
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), ms);
+    try {
+      const r = await fetch(base + path, { ...opts, signal: ctl.signal });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+      return r;
+    } finally { clearTimeout(tm); }
+  };
+  say("Buscando la PC…");
+  let cfg;
+  try { cfg = await (await call("/api/config")).json(); } catch {
+    throw new Error(`Los PDF los lee tu PC. Abrí el Transcriptor de la PC («Transcriptor (iPad).bat»). `
+      + `Si es la primera vez, abrí ${base} en Safari y aceptá el aviso; después volvé a elegir el PDF.`);
+  }
+  if (!cfg.pdf) throw new Error("La PC no tiene el lector de PDF (Audiveris).");
+  say("Mandando el PDF a la PC…");
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("title", file.name.replace(/\.pdf$/i, ""));
+  form.append("mode", "piano");
+  const job = await (await call("/api/jobs/upload", { method: "POST", body: form }, 120000)).json();
+  for (let i = 0; ; i++) {
+    if (i > 480) throw new Error("La PC tardó demasiado en leer el PDF.");
+    await new Promise(r => setTimeout(r, 1500));
+    let j;
+    try { j = await (await call(`/api/jobs/${job.id}`)).json(); } catch { continue; }
+    if (j.status === "ready") break;
+    if (j.status === "error") throw new Error("La PC no pudo leer el PDF: " + (j.error || ""));
+    say(`La PC está leyendo el PDF… ${Math.round((j.progress || 0) * 100)}% (puede tardar un par de minutos)`);
+  }
+  say("Trayendo la partitura…");
+  const blob = await (await call(`/api/jobs/${job.id}/package`, {}, 120000)).blob();
+  const title = await importPackage(new File([blob], "pdf.transcriptor"));
+  return { id: importPackage.lastId, title };
 }
 
 // Canciones mandadas desde la PC a GitHub (compartidas/): solo las notas,
@@ -259,9 +304,7 @@ async function importShared(o) {
 // Partitura (MusicXML o MIDI): las notas vienen escritas, se guarda directo.
 // El audio es silencio del mismo largo, para que el reproductor funcione igual.
 async function importScoreFile(file) {
-  if (/\.pdf$/i.test(file.name)) {
-    throw new Error("Los PDF se leen en la PC: abrilo en el Transcriptor de la PC (pestaña Partitura) y mandalo al iPad.");
-  }
+  if (/\.pdf$/i.test(file.name)) return pdfViaPc(file);
   const d = await importScore(file);
   const id = newId();
   await store.putBlob(id + ":audio", silentWav(d.duration));
