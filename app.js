@@ -1457,6 +1457,8 @@ const engine = {
   // posicion a saltos: con la practica (que frena y sigue en cada nota) y las
   // partituras (audio en silencio) las notas "saltaban" y no iba fluido.
   media: false, vt: 0,
+  // clockOk: el reloj del AudioContext ya camina (ver clockRunning).
+  clockOk: false, playTok: 0, starting: false,
   scheduledUntil: 0, voices: [], timer: null,
   instruments: {}, loading: {}, noise: null,
 
@@ -1481,6 +1483,11 @@ const engine = {
     src.connect(this.origGain).connect(master);
     this.synthGain.connect(master);
     this.metroGain.connect(master);
+    this.ctx.addEventListener("statechange", () => { if (this.ctx.state !== "running") this.clockOk = false; });
+    // Se pone en marcha la salida de sonido ya al abrir la cancion (no al dar
+    // play): con el navegador recien abierto tarda 1-3 s. Si el navegador no
+    // lo deja todavia (falta un toque), lo hace play().
+    this.ctx.resume().catch(() => {});
     piano.load(this.ctx);   // el piano de verdad se carga en segundo plano
     this.audio.addEventListener("ended", () => this.pause());
     // Ruido blanco para la bateria sintetizada.
@@ -1517,9 +1524,30 @@ const engine = {
     this.anchorMedia = this.audio.currentTime;
   },
 
+  // Con el navegador recien abierto, Windows tarda 1-3 s en poner en marcha la
+  // salida de sonido: el AudioContext dice «running» pero su reloj sigue en 0
+  // (medido 25/10/2026; no es la carga del piano: sin piano pasa igual). Si se
+  // arrancaba igual, las notas quedaban quietas y despues sonaban de golpe.
+  // Se espera a que el reloj camine (una sola vez: despues no demora nada).
+  async clockRunning() {
+    if (this.clockOk && this.ctx.state === "running") return;
+    const c0 = this.ctx.currentTime, t0 = performance.now();
+    while (this.ctx.currentTime - c0 < 0.03 && performance.now() - t0 < 4000) await new Promise(r => setTimeout(r, 10));
+    this.clockOk = this.ctx.currentTime - c0 >= 0.03;
+  },
+
   async play() {
     this.init();
-    await this.ctx.resume();
+    if (this.playing || this.starting) return;
+    const tok = ++this.playTok;
+    this.starting = true;
+    try {
+      await this.ctx.resume();
+      await this.clockRunning();
+    } finally {
+      if (tok === this.playTok) this.starting = false;
+    }
+    if (tok !== this.playTok || this.playing) return;   // se pauso (o salto de cancion) mientras esperaba
     this.media = this.wantsMedia();
     if (this.media) {
       if (Math.abs(this.audio.currentTime - this.vt) > 0.05) this.audio.currentTime = this.vt;
@@ -1539,6 +1567,8 @@ const engine = {
 
   pause() {
     if (!this.audio) return;
+    this.playTok++;
+    this.starting = false;
     if (this.playing) this.vt = this.time();
     this.audio.pause();
     this.playing = false;
@@ -1547,7 +1577,7 @@ const engine = {
     ui.onPlayState(false);
   },
 
-  toggle() { this.playing ? this.pause() : this.play(); },
+  toggle() { this.playing || this.starting ? this.pause() : this.play(); },
 
   seek(t) {
     if (!this.audio) return;
