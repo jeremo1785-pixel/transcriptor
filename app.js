@@ -2646,19 +2646,26 @@ const roll = {
         g.fillStyle = "rgba(255,255,255,0.35)";
         g.fillRect(x + r, y + 1.5, w - r * 2, 1);
       }
-      if (names && h > 16 && w > 11) {
-        // El nombre se achica hasta entrar en la nota (Re♭ en una negra angosta).
+      if (names && h > 16) {
+        // Nombre siempre legible (11-14 px). Si no entra en la nota (las 88
+        // teclas la hacen angosta), va en un cartelito oscuro un poco mas ancho.
         const label = noteName(it.p, fifths, latin);
-        let size = k.black ? fs * 0.85 : fs;
+        const size = Math.max(11, Math.min(14, ww * 0.55));
         g.font = `700 ${size}px system-ui`;
         const tw = g.measureText(label).width;
-        if (tw > w - 3) { size *= (w - 3) / tw; g.font = `700 ${size}px system-ui`; }
-        if (size >= 7) {
-          g.fillStyle = k.black ? "rgba(255,255,255,0.92)" : "rgba(10,13,19,0.85)";
-          g.textAlign = "center";
+        g.textAlign = "center";
+        if (tw <= w - 3) {
+          g.fillStyle = k.black ? "rgba(255,255,255,0.95)" : "rgba(10,13,19,0.88)";
           g.fillText(label, x + w / 2, it.bot - 5);
-          g.textAlign = "left";
+        } else if (h > size + 6) {
+          const pw = tw + 6, ph = size + 4, py = it.bot - ph - 2;
+          roundRect(g, x + w / 2 - pw / 2, py, pw, ph, 4);
+          g.fillStyle = "rgba(8,10,16,0.88)";
+          g.fill();
+          g.fillStyle = "#fff";
+          g.fillText(label, x + w / 2, py + ph - 4);
         }
+        g.textAlign = "left";
       }
       // Numero de dedo debajo de la nota (1 = pulgar ... 5 = meñique).
       if (fingers && it.finger && it.bot + 14 < hit) {
