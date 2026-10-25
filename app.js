@@ -135,6 +135,7 @@ async function initHome() {
   syncHomeMode();
   catalog.init();
   newSheet.init();
+  backup.init();
 
   // Lo que quedo a medias (se cerro la app mientras procesaba) se retoma solo.
   for (const s of await store.list()) {
@@ -627,6 +628,7 @@ const catalog = {
     let last = "home";
     try { last = localStorage.getItem("libTab") || "home"; } catch { /* nada */ }
     libTab(["home", "mine", "cat"].includes(last) ? last : "home");
+    $("#mineAll").onclick = () => libTab("mine");
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && !$("#home").hidden) this.refreshShared();
     });
@@ -759,34 +761,125 @@ function hashStr(s) {
   return h >>> 0;
 }
 
-// Pares de colores elegidos a mano (se ven bien con texto blanco encima).
-const COVER_PAIRS = [["#5b6cff", "#b26bff"], ["#ff6a88", "#ff9a5a"], ["#1fb6a6", "#3b82f6"], ["#f59e0b", "#ef4444"],
-  ["#8b5cf6", "#ec4899"], ["#06b6d4", "#6366f1"], ["#22c55e", "#0ea5e9"], ["#f43f5e", "#8b5cf6"],
-  ["#0ea5e9", "#14b8a6"], ["#a855f7", "#6366f1"], ["#fb7185", "#f59e0b"], ["#2563eb", "#7c3aed"]];
+// Portadas sobrias (formas y colores apagados, sin texto encima: el titulo va
+// abajo). Siempre la misma para cada cancion. Se dibujan aca: sin bajar imagenes.
+const COVER_SETS = [
+  ["#efe6d3", "#1d2b45", "#c8553d"], ["#1d2b45", "#efe6d3", "#d9a441"], ["#15161a", "#efe6d3", "#3a6ea5"],
+  ["#c8553d", "#efe6d3", "#1d2b45"], ["#2f4a3e", "#e8dcc2", "#d9a441"], ["#e8dcc2", "#15161a", "#3a6ea5"],
+  ["#3a6ea5", "#efe6d3", "#15161a"], ["#d9a441", "#15161a", "#efe6d3"], ["#283044", "#e8dcc2", "#c8553d"],
+];
+
+function coverArt(id) {
+  let r = hashStr(id || "x");
+  const rnd = () => ((r = Math.imul(r ^ (r >>> 15), 2246822507) >>> 0) % 1000) / 1000;
+  const [bg, a, b] = COVER_SETS[r % COVER_SETS.length];
+  const kind = Math.floor(rnd() * 6), x = 22 + rnd() * 56, y = 22 + rnd() * 26, s = 12 + rnd() * 10;
+  let shapes;
+  if (kind === 0) {          // sol sobre lomas
+    shapes = `<circle cx="${x}" cy="${y}" r="${s}" fill="${b}"/>
+      <path d="M0 ${70 + rnd() * 8} Q 30 ${52 + rnd() * 10} 60 ${66 + rnd() * 6} T 100 ${60 + rnd() * 8} V100 H0 Z" fill="${a}"/>`;
+  } else if (kind === 1) {   // media luna grande y una linea
+    shapes = `<circle cx="${rnd() < 0.5 ? 100 : 0}" cy="55" r="${40 + rnd() * 12}" fill="${a}"/>
+      <circle cx="${x}" cy="${y}" r="${s * 0.7}" fill="${b}"/>
+      <path d="M${10 + rnd() * 20} 100 C 30 60 50 50 ${60 + rnd() * 30} 0" stroke="${a}" stroke-width="1.6" fill="none"/>`;
+  } else if (kind === 2) {   // arco
+    const ax = 18 + rnd() * 30, w = 30 + rnd() * 14;
+    shapes = `<path d="M${ax} 100 V${50 + rnd() * 10} A${w / 2} ${w / 2} 0 0 1 ${ax + w} ${50 + rnd() * 10} V100 Z" fill="${a}"/>
+      <circle cx="${ax + w + 12}" cy="${y + 10}" r="${s * 0.6}" fill="${b}"/>`;
+  } else if (kind === 3) {   // franjas y circulo
+    shapes = `<rect x="16" y="0" width="5" height="100" fill="${a}"/><rect x="25" y="0" width="2.5" height="100" fill="${a}"/>
+      <circle cx="${55 + rnd() * 20}" cy="${45 + rnd() * 20}" r="${24 + rnd() * 10}" fill="${b}"/>`;
+  } else if (kind === 4) {   // luna sobre el agua
+    shapes = `<circle cx="${x}" cy="${y + 4}" r="${s * 0.75}" fill="${a}"/>
+      ${[0, 1, 2, 3].map(i => `<rect x="${x - 14 + i * 3}" y="${72 + i * 6}" width="${28 - i * 6}" height="1.6" fill="${a}" opacity="${0.9 - i * 0.2}"/>`).join("")}
+      <rect x="0" y="66" width="100" height="34" fill="${b}" opacity=".35"/>`;
+  } else {                   // hoja
+    shapes = `<ellipse cx="${40 + rnd() * 20}" cy="58" rx="13" ry="34" transform="rotate(${-35 + rnd() * 70} 50 58)" fill="${a}"/>
+      <circle cx="${x}" cy="${y}" r="${s * 0.55}" fill="${b}"/>`;
+  }
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="100" height="100" fill="${bg}"/>${shapes}</svg>`;
+}
 
 function coverHtml(o, opts = {}) {
-  const h = hashStr(o.id || o.title || "x");
-  const [c1, c2] = COVER_PAIRS[h % COVER_PAIRS.length];
-  // Notas cayendo sobre un tecladito: siempre las mismas para cada cancion.
-  let r = h, bars = "";
-  const rnd = () => ((r = Math.imul(r ^ (r >>> 15), 2246822507) >>> 0) % 1000) / 1000;
-  for (let i = 0; i < 7; i++) {
-    const x = 6 + Math.floor(rnd() * 13) * 7, y = 8 + rnd() * 48, hh = 8 + rnd() * 26;
-    bars += `<rect x="${x}" y="${y.toFixed(1)}" width="5.4" height="${hh.toFixed(1)}" rx="2.2" fill="#fff" opacity="${(0.22 + rnd() * 0.4).toFixed(2)}"/>`;
-  }
-  let keysSvg = "";
-  for (let i = 0; i < 14; i++) keysSvg += `<rect x="${i * 7.14 + 0.4}" y="84" width="6.4" height="16" rx="1" fill="#fff" opacity=".9"/>`;
-  for (let i = 0; i < 13; i++) if ([0, 1, 3, 4, 5].includes(i % 7)) keysSvg += `<rect x="${i * 7.14 + 4.9}" y="84" width="4" height="9.5" rx=".8" fill="#11131a"/>`;
-  const initial = esc((o.composer && o.composer !== "Varios" && o.kind !== "pc" ? o.composer.split(/[\s.]+/).filter(w => w && !/^(jr|sr|ii|iii)$/i.test(w)).pop() : o.title || "?").slice(0, 14));
-  return `<div class="cover" style="background:linear-gradient(140deg,${c1},${c2})">
-      <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${bars}
-        <rect x="0" y="81" width="100" height="3" fill="#fff" opacity=".55"/>${keysSvg}</svg>
-      <span class="cv-name">${initial}</span>
+  return `<div class="cover art">
+      ${coverArt(o.id || o.title)}
       ${o.level ? `<span class="cv-lvl l${o.level}">${LEVELS[o.level]}</span>` : ""}
       ${opts.badge ? `<span class="cv-badge">${esc(opts.badge)}</span>` : ""}
       ${opts.score != null ? `<span class="cv-score">★ ${opts.score}%</span>` : ""}
       <span class="cv-play"><svg class="ic fill"><use href="#i-play"/></svg></span>
     </div>`;
+}
+
+// Titulo y autor de una cancion propia: de la biblioteca si vino de ahi (no se
+// adivinan de un nombre como «Daisy Bell Song - Easy Piano Tutorial»).
+function songInfo(j) {
+  const added = catalog.added(), catId = Object.keys(added).find(k => added[k] === j.id);
+  const o = catId && catalog.items && catalog.items.find(x => x.id === catId);
+  return o ? { title: o.title, composer: o.composer, level: o.level } : { title: j.title, composer: "" };
+}
+
+// «Seguí practicando»: la ultima cancion con un punto guardado de verdad. Si
+// todavia no practicaste nada, una facil y conocida para empezar (sin inventar progreso).
+const hero = {
+  render(list) {
+    const box = $("#resumeCard");
+    if (!box) return;
+    const D = progress.load();
+    const ready = (list || home.lastList || []).filter(j => j.status === "ready");
+    const withRes = ready.filter(j => D.songs[j.id]?.resume).sort((a, b) => D.songs[b.id].resume.at - D.songs[a.id].resume.at);
+    const j = withRes[0];
+    if (j) {
+      const r = D.songs[j.id].resume, info = songInfo(j);
+      const hands = { derecha: "Mano derecha", izquierda: "Mano izquierda", ambas: "Las dos manos" }[r.hands] || "";
+      const lv = r.levels || {}, LV = { 1: "fácil", 2: "media", 3: "difícil" };
+      const lvl = r.hands === "derecha" ? LV[lv[1]] : r.hands === "izquierda" ? LV[lv[0]] : lv[0] === lv[1] ? LV[lv[0]] : "";
+      $("#rcLabel").textContent = "Seguí practicando";
+      $("#rcTitle").textContent = info.title;
+      $("#rcComp").textContent = info.composer;
+      $("#rcMeta").textContent = [hands, lvl ? `Nivel ${lvl}` : "", r.speed && r.speed < 1 ? `${Math.round(r.speed * 100)}% de velocidad` : "",
+        r.learn ? `Aprender: parte ${r.learn.sec + 1}` : "", `quedaste en ${fmtTime(r.t || 0)}`].filter(Boolean).join(" · ");
+      $("#rcCover").innerHTML = coverArt(j.id);
+      $("#rcGo").lastChild.textContent = " Continuar práctica";
+      $("#rcGo").onclick = () => {
+        try { sessionStorage.setItem("resume", j.id); } catch { /* nada */ }
+        location.hash = `#/cancion/${j.id}`;
+      };
+      $("#rcSee").hidden = false;
+      $("#rcSee").onclick = () => (location.hash = `#/cancion/${j.id}`);
+      box.hidden = false;
+      return;
+    }
+    const o = catalog.items && catalog.items.filter(x => x.level === 1).sort((a, b) => popularity(b) - popularity(a))[0];
+    if (!o) { box.hidden = true; return; }
+    $("#rcLabel").textContent = "Para empezar";
+    $("#rcTitle").textContent = o.title;
+    $("#rcComp").textContent = o.composer;
+    $("#rcMeta").textContent = `Nivel fácil · ${fmtTime(o.dur)}`;
+    $("#rcCover").innerHTML = coverArt(o.id);
+    $("#rcGo").lastChild.textContent = " Empezar";
+    $("#rcGo").onclick = () => catalog.open(o, $("#rcGo"));
+    $("#rcSee").hidden = true;
+    box.hidden = false;
+  },
+};
+
+// Al tocar «Continuar práctica»: la cancion se abre como la dejaste.
+function applyResume() {
+  const r = progress.resume(player.id);
+  if (!r) return;
+  intro.hide();
+  if (r.levels) { player.levels = { ...player.levels, ...r.levels }; applyLevels(); }
+  if (r.source) practice.source = r.source;
+  if (r.learn) {
+    learn.secs = learn.sections();
+    learn.start(r.learn.sec, r.learn.stage);
+    return;
+  }
+  applyHands(r.hands === "derecha" ? "1" : r.hands === "izquierda" ? "0" : "both");
+  if (r.speed) setSpeed(r.speed);
+  setView(r.view === "sheet" ? "sheet" : "roll");
+  engine.seek(r.t || 0);
+  practice.start();
 }
 
 function songCard(o) {
@@ -809,6 +902,7 @@ function popularity(o) {
 const shelves = {
   render() {
     progress.refreshMap();
+    hero.render();
     const items = catalog.items || [];
     const box = $("#shelves");
     if (!box || !items.length) return;
@@ -859,18 +953,23 @@ const shelves = {
     // Las ultimas que practicaste primero.
     const when = j => progress.last(j.id) || j.created || 0;
     const all = list.filter(j => j.status === "ready").sort((a, b) => when(b) - when(a));
-    const card = j => `
-      <button class="song-card mine" data-song="${esc(j.id)}">
-        ${coverHtml({ id: j.id, title: j.title, composer: "" }, { badge: j.mode === "partitura" ? "Partitura" : "Transcripta", score: progress.best(j.id) })}
-        <span class="sc-t">${esc(j.title)}</span>
-        <span class="sc-m">${j.duration ? fmtTime(j.duration) : ""}</span>
+    home.lastList = list;
+    const card = j => {
+      const info = songInfo(j), best = progress.best(j.id);
+      return `<button class="mini-card" data-song="${esc(j.id)}">
+        <span class="mc-cover">${coverArt(j.id)}</span>
+        <span class="mc-txt"><b>${esc(info.title)}</b><span>${esc(info.composer || (j.mode === "partitura" ? "Partitura" : "Transcripta"))}</span>
+          <small>${j.duration ? fmtTime(j.duration) : ""}${best != null ? ` · ★ ${best}%` : ""}</small></span>
+        <span class="mc-play"><svg class="ic fill"><use href="#i-play"/></svg></span>
       </button>`;
+    };
     const fill = (el, items) => {
       el.hidden = !items.length;
       $(".shelf-row", el).innerHTML = items.map(card).join("");
-      $$(".song-card", el).forEach(b => (b.onclick = () => (location.hash = `#/cancion/${b.dataset.song}`)));
+      $$(".mini-card", el).forEach(b => (b.onclick = () => (location.hash = `#/cancion/${b.dataset.song}`)));
     };
-    fill(box, all.slice(0, 16));
+    fill(box, all.slice(0, 6));
+    hero.render(list);
     const fav = $("#shelfFav");
     if (fav) fill(fav, all.filter(j => progress.isFav(j.id)));
     progress.syncHead();
@@ -908,6 +1007,101 @@ const newSheet = {
         } else if (Date.now() - t0 > 120000) clearInterval(watch);
       }, 300);
     });
+  },
+};
+
+/* =====================================================================
+   Copia de respaldo del progreso. El progreso vive en este aparato: mandar
+   una cancion al iPad NO lleva el progreso. Con esto se guarda en un archivo
+   y se recupera (en este aparato o en otro). Las canciones se reconocen por
+   la obra de la biblioteca o por el nombre (el codigo interno cambia).
+   ===================================================================== */
+const backup = {
+  PREFS: ["src", "latin", "fx", "fingers", "sheetNames", "chords", "easy"],
+  isKey(k) { return k === "progress" || k.startsWith("learn:") || k.startsWith("lvl:") || this.PREFS.includes(k); },
+
+  // Para reconocer cada cancion en otro aparato: titulo y obra de la biblioteca.
+  songsMeta() {
+    const added = catalog.added(), inv = {};
+    for (const [cat, sid] of Object.entries(added)) inv[sid] = cat;
+    const meta = {};
+    for (const j of home.lastList || []) meta[j.id] = { title: j.title, cat: inv[j.id] || null };
+    return meta;
+  },
+
+  build(data) {
+    return { app: "transcriptor", kind: "progreso", v: 1, at: new Date().toISOString(), songs: this.songsMeta(), data };
+  },
+
+  async save() {
+    const data = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (this.isKey(k)) data[k] = localStorage.getItem(k);
+      }
+    } catch { toast("No se pudo leer el progreso de este aparato."); return; }
+    const out = this.build(data);
+    const d = new Date(), name = `transcriptor-progreso-${dayKey(d)}.json`;
+    const file = new File([JSON.stringify(out)], name, { type: "application/json" });
+    if (typeof saveFile === "function") { try { await saveFile(file); } catch (e) { if (e.name !== "AbortError") toast(e.message); } return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(file);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast("Copia guardada: " + name, 5000);
+  },
+
+  async load(file) {
+    let b;
+    try { b = JSON.parse(await file.text()); } catch { toast("Ese archivo no es una copia del Transcriptor."); return; }
+    if (!b || b.app !== "transcriptor" || b.kind !== "progreso" || typeof b.data !== "object") {
+      toast("Ese archivo no es una copia de progreso del Transcriptor."); return;
+    }
+    if (!confirm("Esto reemplaza el progreso de este aparato por el de la copia (lo actual queda guardado por las dudas). ¿Seguir?")) return;
+    // Codigo de cada cancion de la copia -> codigo de la misma cancion aca.
+    const added = catalog.added(), mine = home.lastList || [], map = {};
+    for (const [oldId, m] of Object.entries(b.songs || {})) {
+      const byCat = m.cat && added[m.cat];
+      const byTitle = mine.find(j => j.title === m.title);
+      map[oldId] = byCat || (byTitle && byTitle.id) || oldId;
+    }
+    const remapKey = k => {
+      const m = k.match(/^(learn|lvl):(.+)$/);
+      return m && map[m[2]] ? `${m[1]}:${map[m[2]]}` : k;
+    };
+    try {
+      // Lo de ahora, por si se arrepiente (se recupera con la consola o pidiendolo).
+      const prev = {};
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (this.isKey(k)) prev[k] = localStorage.getItem(k); }
+      localStorage.setItem("progreso-anterior", JSON.stringify({ at: new Date().toISOString(), data: prev }));
+      let n = 0, matched = 0;
+      for (const [k, v] of Object.entries(b.data)) {
+        if (!this.isKey(k) || typeof v !== "string") continue;
+        if (k === "progress") {
+          const p = JSON.parse(v);
+          const songs = {};
+          for (const [id, s] of Object.entries(p.songs || {})) { songs[map[id] || id] = s; if (map[id] && map[id] !== id) matched++; }
+          p.songs = songs;
+          p.fav = (p.fav || []).map(id => map[id] || id);
+          localStorage.setItem("progress", JSON.stringify(p));
+        } else localStorage.setItem(remapKey(k), v);
+        n++;
+      }
+      progress.data = null;
+      progress.syncHead();
+      refreshJobs();
+      toast(`Progreso recuperado (${n} datos${matched ? `, ${matched} ${matched === 1 ? "canción reconocida" : "canciones reconocidas"} en este aparato` : ""}).`, 7000);
+    } catch (e) {
+      toast("No se pudo recuperar: " + e.message);
+    }
+  },
+
+  init() {
+    $$("[data-backup=save]").forEach(b => (b.onclick = () => this.save()));
+    $$("[data-backup=load]").forEach(b => (b.onclick = () => $("#backupInput").click()));
+    $("#backupInput").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) this.load(f); };
   },
 };
 
@@ -1522,6 +1716,14 @@ async function openSong(id) {
   sheet.invalidate();
   setView(player.view);
   intro.show();
+  checkResume(id);
+}
+
+// ¿Se pidio «Continuar práctica» para esta cancion?
+function checkResume(id) {
+  let pend = null;
+  try { pend = sessionStorage.getItem("resume"); sessionStorage.removeItem("resume"); } catch { /* nada */ }
+  if (pend === id) applyResume();
 }
 
 // Datos listos para mostrar: ajustes de tempo aplicados y manos del piano.
@@ -1714,6 +1916,7 @@ const learn = {
     practice.hits = practice.misses = 0;
     practice.finished = false;
     this.label(`Parte ${i + 1} de ${this.secs.length} · ${S.name}`);
+    syncLoopBtn();
     ui.practiceStatus();
   },
 
@@ -1770,6 +1973,7 @@ const learn = {
     if (this.savedSpeed != null) setSpeed(this.savedSpeed);
     this.savedSpeed = null;
     this.label("");
+    syncLoopBtn();
   },
 };
 
@@ -1887,9 +2091,17 @@ function applyHands(mode) {
 function syncHands() {
   const hs = player.tracks.filter(t => t.hand != null);
   $("#handsBox").hidden = hs.length < 2;
+  $("#fHands").hidden = hs.length < 2;
   const on = hs.filter(t => t.practice).map(t => String(t.hand));
   const mode = on.length === 2 || (!on.length && !practice.on) ? "both" : on.length === 1 ? on[0] : "";
-  $$("#handSeg button").forEach(b => b.classList.toggle("on", b.dataset.h === mode));
+  $$("#handSeg button, #fHands button").forEach(b => b.classList.toggle("on", b.dataset.h === mode));
+}
+
+// «Repetir parte» refleja si hay una parte repitiendose.
+function syncLoopBtn() {
+  const on = player.loop.a != null && player.loop.b != null;
+  $("#fLoop").classList.toggle("on", on);
+  $("span", $("#fLoop")).textContent = on ? "Dejar de repetir" : "Repetir parte";
 }
 
 function syncSpeed() {
@@ -1985,7 +2197,9 @@ const roll = {
   init() {
     this.canvas = $("#roll");
     this.g = this.canvas.getContext("2d");
-    new ResizeObserver(() => this.resize()).observe($("#stage"));
+    const ro = new ResizeObserver(() => this.resize());
+    ro.observe($("#stage"));
+    ro.observe(this.canvas);          // practicando cambia su alto (franja de abajo, partitura)
     this.canvas.addEventListener("wheel", e => {
       e.preventDefault();
       const pps = +$("#zoom").value;
@@ -2159,6 +2373,10 @@ const roll = {
 
     const t = engine.time();
     const pps = +$("#zoom").value;
+    if (focusMode.on && !kbOnly) {
+      const kb = Math.max(90, Math.min(200, H * 0.22));
+      if (this._needKb !== kb) { this._needKb = kb; $("#fNeed").style.bottom = (kb + 70) + "px"; }
+    } else if (this._needKb) { this._needKb = 0; $("#fNeed").style.bottom = ""; }
     const kbH = kbOnly ? H - 4 : focusMode.on ? Math.max(90, Math.min(200, H * 0.22)) : Math.max(64, Math.min(130, H * 0.17));
     const hit = H - kbH;
     const L = this.keyLayout(), { keys, ww } = L;
@@ -3308,9 +3526,12 @@ const ui = {
     $("#practiceBtn").lastChild.textContent = P.on ? " Dejar de practicar" : " Practicar";
     $$("#pSrc button").forEach(b => b.classList.toggle("on", b.dataset.src === P.source));
     $("#pDev").textContent = P.device || "";
-    const srcBtn = $$("#pSrc button").find(b => b.dataset.src === P.source);
-    $("#fSrc").innerHTML = `<svg class="ic"><use href="#i-${P.source === "mic" ? "mic" : "piano"}"/></svg> ${srcBtn ? srcBtn.textContent : ""}`;
-    $("#fSrc").title = P.device || "";
+    // Lo que de verdad esta pasando con la entrada (no «conectado» si no se comprobo).
+    const st = P.source === "mic" ? (P.mic ? [true, "Micrófono activo"] : [false, "Micrófono sin permiso"])
+      : P.source === "pc" ? (/^Teclado en la PC/.test(P.device || "") ? [true, "Teclado en la PC"] : [false, "Buscando la PC…"])
+      : (P.midiCount > 0 ? [true, "Teclado conectado"] : [false, "Sin teclado MIDI"]);
+    $("#fSrc").innerHTML = `<i class="sdot ${st[0] ? "ok" : "warn"}"></i><svg class="ic"><use href="#i-${P.source === "mic" ? "mic" : "piano"}"/></svg> ${st[1]}`;
+    $("#fSrc").title = (P.device || "") + " · tocá para cambiar";
     $("#pMicRow").hidden = P.source !== "mic";
     $("#pEchoRow").hidden = P.source !== "midi";
     $("#pWait").checked = P.wait;
@@ -3354,6 +3575,8 @@ const ui = {
         : "Dale ▶ (o espacio) y tocá las notas cuando lleguen a la línea.";
     }
     $("#pStatus").innerHTML = $("#fStatus").innerHTML = html;
+    $("#fNeed").innerHTML = html;
+    $("#fNeed").hidden = !html;
   },
 
   micLevel(db) {
@@ -3365,7 +3588,10 @@ const ui = {
     if (!player.data || $("#player").hidden) return;
     const t = engine.time(), d = player.data.duration || 1;
     $("#tNow").textContent = fmtTime(t);
-    if (focusMode.on) $("#fTime").textContent = `${fmtTime(t)} / ${fmtTime(d)}`;
+    if (focusMode.on) {
+      $("#fTime").textContent = `${fmtTime(t)} / ${fmtTime(d)}`;
+      $("#fNow").textContent = fmtTime(t);
+    }
     const pct = Math.min(100, (t / d) * 100);
     $("#seekFill").style.width = pct + "%";
     $("#seekHead").style.left = pct + "%";
@@ -3437,6 +3663,14 @@ const focusMode = {
   // tocar, cómo vas, velocidad) y el cartel flotante no hace falta.
   syncPractice() {
     document.body.classList.toggle("practicing", this.on && practice.on);
+    if (player.data) {
+      // Titulo y autor: de la biblioteca si la cancion vino de ahi (no se adivinan de un nombre).
+      const added = catalog.added(), catId = Object.keys(added).find(k => added[k] === player.id);
+      const o = catId && catalog.items && catalog.items.find(x => x.id === catId);
+      $("#fTitle").textContent = o ? o.title : player.data.title;
+      $("#fSub").textContent = o ? o.composer : "Tu canción";
+      $("#fDur").textContent = fmtTime(player.data.duration);
+    }
     $("#fExit").lastChild.textContent = practice.on ? " Terminar" : " Salir";
     if (player.data) player.computeRange();
   },
@@ -3458,6 +3692,23 @@ const focusMode = {
     $("#fExit").onclick = () => (practice.on ? practice.stop(true) : this.toggle(false));
     $("#fPlay").onclick = () => engine.toggle();
     $("#fSpDown").onclick = () => $("#spDown").click();
+    $$("#fHands button").forEach(b => (b.onclick = () => applyHands(b.dataset.h)));
+    // Repetir parte: la parte de 4 compases donde estas (otra vez = dejar de repetir).
+    $("#fLoop").onclick = () => {
+      const L = player.loop;
+      if (L.a != null) {
+        L.a = L.b = null; L.stage = 0;
+      } else {
+        const t = engine.time(), secs = learn.sections();
+        const s = secs.find(x => t >= x.a - 0.05 && t < x.b) || secs[0];
+        if (!s) return;
+        L.a = Math.max(0, s.a - 0.3); L.b = s.b; L.stage = 2;
+        if (t < L.a || t >= L.b) engine.seek(L.a);
+      }
+      $("#loopBtn").classList.toggle("on", L.a != null);
+      $("span", $("#loopBtn")).textContent = L.a != null ? "Quitar bucle" : "Bucle";
+      syncLoopBtn();
+    };
     const prog = $(".f-prog");
     const seekTo = e => {
       const r = prog.getBoundingClientRect();
@@ -3553,6 +3804,7 @@ function initPlayer() {
     engine.scheduledUntil = engine.time();
   };
 
+  $("#loopBtn").addEventListener("click", () => setTimeout(syncLoopBtn));
   $("#loopBtn").onclick = e => {
     const L = player.loop, btn = e.currentTarget;
     if (L.stage === 0) {
@@ -3738,6 +3990,7 @@ function route() {
     $("#home").hidden = true;
     $("#player").hidden = false;
     if (player.id !== m[1]) openSong(m[1]);
+    else checkResume(m[1]);                // la misma que ya estaba abierta
     requestAnimationFrame(() => roll.resize());
   } else {
     engine.pause();
@@ -3751,7 +4004,7 @@ function route() {
 }
 
 // Para la prueba de humo (humo.js) y para diagnosticar desde la consola.
-window.__app = { player, engine, sheet, practice, roll, setView, focusMode, piano, summary, progress, learn };
+window.__app = { player, engine, sheet, practice, roll, setView, focusMode, piano, summary, progress, learn, backup, catalog };
 
 (async function main() {
   initPlayer();

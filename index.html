@@ -41,7 +41,12 @@
 
   <header class="topbar">
     <a class="brand" href="#/"><span class="logo"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="3.4" height="9" rx="1.2"/><rect x="8.2" y="4" width="3.4" height="16" rx="1.2"/><rect x="13.4" y="8" width="3.4" height="12" rx="1.2"/><rect x="18.6" y="13" width="2.6" height="7" rx="1.1" opacity=".7"/></svg></span>Transcriptor</a>
-    <span class="tagline">Del audio a las notas · todo en tu iPad</span>
+    <nav class="top-tabs" id="libTabs">
+      <button data-lib="home" class="on">Inicio</button>
+      <button data-lib="mine">Mis canciones</button>
+      <button data-lib="cat">Explorar <small id="catCount"></small></button>
+    </nav>
+    <button id="newBtn" class="top-new"><svg class="ic"><use href="#i-upload"/></svg> Agregar canción</button>
   </header>
 
   <main>
@@ -49,11 +54,10 @@
     <section id="home" class="view">
       <div class="home-head">
         <div>
-          <h1>¿Qué tocamos hoy?</h1>
-          <p>Elegí una canción y practicala con las notas cayendo.</p>
+          <h1>Tu próximo rato al piano.</h1>
+          <p>Retomá donde quedaste o elegí algo nuevo.</p>
           <span class="streak" id="streak" hidden></span>
         </div>
-        <button id="newBtn" class="primary"><svg class="ic"><use href="#i-upload"/></svg> Agregar canción</button>
       </div>
       <div class="modal" id="newModal" hidden>
       <div class="card new">
@@ -118,24 +122,40 @@
       </div><!-- /newModal -->
 
       <div class="library">
-        <div class="seg lib-tabs" id="libTabs">
-          <button data-lib="home" class="on">Inicio</button>
-          <button data-lib="mine">Mis canciones</button>
-          <button data-lib="cat">Explorar <small id="catCount"></small></button>
-        </div>
         <div id="libHome">
+          <!-- Seguí practicando (con la posicion guardada) o, si no hay, una para empezar. -->
+          <section class="resume" id="resumeCard" hidden>
+            <div class="rc-cover" id="rcCover"></div>
+            <div class="rc-body">
+              <span class="rc-label" id="rcLabel"></span>
+              <h2 id="rcTitle"></h2>
+              <p class="rc-comp" id="rcComp"></p>
+              <p class="rc-meta" id="rcMeta"></p>
+              <div class="rc-actions">
+                <button class="rc-go" id="rcGo"><svg class="ic fill"><use href="#i-play"/></svg> Continuar práctica</button>
+                <button class="rc-see" id="rcSee">Ver canción</button>
+              </div>
+            </div>
+          </section>
           <section class="shelf" id="shelfMine" hidden>
-            <div class="shelf-head"><div><h3>Seguí practicando</h3><span>Tus canciones</span></div></div>
-            <div class="shelf-row"></div>
+            <div class="shelf-head"><div><h3>Tus canciones</h3></div><button class="link" id="mineAll">Ver todas →</button></div>
+            <div class="shelf-row mini-row"></div>
           </section>
           <section class="shelf" id="shelfFav" hidden>
             <div class="shelf-head"><div><h3>Favoritas</h3><span>Las que marcaste con el corazón</span></div></div>
-            <div class="shelf-row"></div>
+            <div class="shelf-row mini-row"></div>
           </section>
           <div id="shelves"></div>
         </div>
         <div id="libMine" hidden>
+          <input type="file" id="backupInput" accept=".json,application/json" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
           <ul id="jobs" class="jobs"></ul>
+          <div class="backup-box">
+            <b>Tu progreso</b>
+            <p class="hint small">Puntajes, racha, favoritas, «Aprender» y niveles quedan guardados en este aparato
+              (mandar una canción al iPad no lleva el progreso). Guardá una copia para no perderlo o pasarlo a otro aparato.</p>
+            <div class="backup-btns"><button class="ghost" data-backup="save">Guardar copia</button><button class="ghost" data-backup="load">Recuperar copia</button></div>
+          </div>
           <p id="emptyLib" class="hint" hidden>Todavía no hay nada. Cargá una canción o elegí una de la Biblioteca.</p>
         </div>
         <!-- Partituras ya cargadas, listas para practicar (Mutopia, piano solo). -->
@@ -192,22 +212,39 @@
         <div class="stage" id="stage">
           <!-- Pantalla completa: controles minimos que se esconden solos. -->
           <div class="focus-bar" id="focusBar">
-            <button id="fPlay" class="play" title="Reproducir / pausa"><svg class="ic fill play-ic"><use href="#i-play"/></svg></button>
-            <span id="fTime" class="mono">0:00</span>
-            <div class="seg small" id="fView">
-              <button data-view="roll" class="on">Notas</button>
-              <button data-view="sheet">Partitura</button>
+            <div class="fb-top">
+              <button id="fExit" class="ghost" title="Salir de pantalla completa (Esc)"><svg class="ic"><use href="#i-back"/></svg> Salir</button>
+              <div class="fb-title"><b id="fTitle"></b><span><span id="fSub"></span><span id="fLearn" class="f-learn" hidden></span></span></div>
+              <span id="fScore" class="f-score"></span>
+              <button id="fSrc" class="f-src" title="Cómo te escucha la app (tocá para cambiar)"></button>
+            </div>
+            <div class="fb-ctl">
+              <button id="fPlay" class="play" title="Reproducir / pausa"><svg class="ic fill play-ic"><use href="#i-play"/></svg></button>
+              <span id="fTime" class="mono">0:00</span>
+              <div class="seg f-hands" id="fHands">
+                <button data-h="0"><i class="hdot l"></i>Izquierda</button>
+                <button data-h="both">Ambas</button>
+                <button data-h="1"><i class="hdot r"></i>Derecha</button>
+              </div>
+              <div class="f-speed" title="Velocidad">
+                <button id="fSpDown" aria-label="Más lento">−</button><span id="fSpeed">100%</span><button id="fSpUp" aria-label="Más rápido">+</button>
+              </div>
+              <div class="seg small" id="fView">
+                <button data-view="roll" class="on">Notas</button>
+                <button data-view="sheet">Partitura</button>
+              </div>
             </div>
             <span id="fStatus" class="f-status"></span>
-            <div class="f-prog"><i id="fProgFill"></i></div>
-            <span id="fLearn" class="f-learn" hidden></span>
-            <span id="fScore" class="f-score"></span>
-            <button id="fSrc" class="f-src" title="Cómo te escucha la app"></button>
-            <div class="f-speed" title="Velocidad">
-              <button id="fSpDown" aria-label="Más lento">−</button><span id="fSpeed">100%</span><button id="fSpUp" aria-label="Más rápido">+</button>
-            </div>
-            <button id="fExit" class="ghost" title="Salir de pantalla completa (Esc)"><svg class="ic"><use href="#i-shrink"/></svg> Salir</button>
           </div>
+          <!-- Practicando: abajo el recorrido de la cancion y «Repetir parte». -->
+          <div class="f-bottom" id="fBottom">
+            <span id="fNow" class="mono">0:00</span>
+            <div class="f-prog"><i id="fProgFill"></i></div>
+            <span id="fDur" class="mono">0:00</span>
+            <button id="fLoop" class="f-loop" title="Repetir la parte donde estás (4 compases)"><svg class="ic"><use href="#i-loop"/></svg> <span>Repetir parte</span></button>
+          </div>
+          <!-- Lo que hay que tocar, justo arriba del teclado. -->
+          <div class="f-need" id="fNeed" hidden></div>
           <!-- Practica: lo que hay que tocar y como vas, arriba de las notas. -->
           <div class="hud" id="hud" hidden>
             <div id="pStatus" class="p-status"></div>
@@ -393,6 +430,14 @@
 
           <h4>Pistas</h4>
           <ul id="tracks" class="tracks"></ul>
+
+          <h4>Tu progreso</h4>
+          <div class="backup-box">
+            <b>Tu progreso</b>
+            <p class="hint small">Puntajes, racha, favoritas, «Aprender» y niveles quedan guardados en este aparato
+              (mandar una canción al iPad no lleva el progreso). Guardá una copia para no perderlo o pasarlo a otro aparato.</p>
+            <div class="backup-btns"><button class="ghost" data-backup="save">Guardar copia</button><button class="ghost" data-backup="load">Recuperar copia</button></div>
+          </div>
 
           <h4>Exportar</h4>
           <div class="exp-list" id="exportMenu">
