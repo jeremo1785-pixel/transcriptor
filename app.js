@@ -2545,10 +2545,6 @@ const roll = {
 
     const t = engine.time();
     const pps = +$("#zoom").value;
-    if (focusMode.on && !kbOnly) {
-      const kb = Math.max(90, Math.min(200, H * 0.22));
-      if (this._needKb !== kb) { this._needKb = kb; $("#fNeed").style.bottom = (kb + 70) + "px"; }
-    } else if (this._needKb) { this._needKb = 0; $("#fNeed").style.bottom = ""; }
     const kbH = kbOnly ? H - 4 : focusMode.on ? Math.max(90, Math.min(200, H * 0.22)) : Math.max(64, Math.min(130, H * 0.17));
     const hit = H - kbH;
     const L = this.keyLayout(), { keys, ww } = L;

@@ -249,13 +249,13 @@
           </div>
           <!-- Practicando: abajo el recorrido de la cancion y «Repetir parte». -->
           <div class="f-bottom" id="fBottom">
+            <!-- Lo que hay que tocar: aca abajo, para no tapar las notas que llegan a la linea. -->
+            <div class="f-need" id="fNeed" hidden></div>
             <span id="fNow" class="mono">0:00</span>
             <div class="f-prog"><i id="fProgFill"></i></div>
             <span id="fDur" class="mono">0:00</span>
             <button id="fLoop" class="f-loop" title="Repetir la parte donde estás (4 compases)"><svg class="ic"><use href="#i-loop"/></svg> <span>Repetir parte</span></button>
           </div>
-          <!-- Lo que hay que tocar, justo arriba del teclado. -->
-          <div class="f-need" id="fNeed" hidden></div>
           <!-- Practica: lo que hay que tocar y como vas, arriba de las notas. -->
           <div class="hud" id="hud" hidden>
             <div id="pStatus" class="p-status"></div>

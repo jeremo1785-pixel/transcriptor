@@ -879,3 +879,9 @@ body.focus.practicing.sheet-practice .f-need { bottom: 260px !important; }
 .top-new.yt:hover { background: rgba(255,80,80,.1); }
 .top-new.yt + .top-new { margin-left: 0; }
 @media (max-width: 900px) { .top-new.yt { font-size: 0; padding: 8px 10px; } .top-new.yt .ic { font-size: 15px; } }
+
+/* «Tocá …» en la franja de abajo (arriba del teclado tapaba las notas que llegaban). */
+body.focus.practicing .f-need:not([hidden]), body.focus.practicing.sheet-practice .f-need:not([hidden]) {
+  position: static; transform: none; left: auto; bottom: auto !important; flex: 0 1 auto; max-width: 46%;
+  padding: 6px 12px; font-size: 15px; border-radius: 10px; }
+body.focus.practicing .f-bottom .f-prog { min-width: 120px; }
