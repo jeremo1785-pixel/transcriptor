@@ -261,8 +261,18 @@ const pc = {
       return r;
     } finally { clearTimeout(tm); }
   },
+  // La pagina de la PC por http (sin el problema del certificado).
+  plainBase() { return this.base().replace(/^https:/, "http:").replace(/:8443$/, ":8430"); },
+
+  // Abre el Transcriptor de la PC con los links: la PC los transcribe y, al
+  // terminar, los sube sola a GitHub («Desde tu PC»).
+  handoff(urls) {
+    this.say("Te abro el Transcriptor de tu PC para mandarle el link…");
+    location.href = `${this.plainBase()}/#yt=${encodeURIComponent(urls.join(" "))}`;
+  },
+
   async config(what) {
-    try { return await (await this.call("/api/config")).json(); } catch {
+    try { return await (await this.call("/api/config", {}, 3000)).json(); } catch {
       throw new Error(`${what} lo hace tu PC. Abrí el Transcriptor de la PC («Transcriptor (iPad).bat»). `
         + `Si es la primera vez, abrí ${this.base()} en Safari y aceptá el aviso; después volvé a intentar.`);
     }
@@ -356,7 +366,10 @@ async function ytBatchViaPc(lines) {
   const bad = lines.filter(l => !YT_RX.test(l));
   if (bad.length) throw new Error(`Eso no es un link de YouTube: ${bad[0]}`);
   pc.say("Buscando la PC…");
-  await pc.config("Transcribir videos de YouTube");
+  try { await pc.config("Transcribir videos de YouTube"); } catch {
+    pc.handoff(lines);
+    return 0;
+  }
   const urls = [];
   for (const l of lines) {
     if (/youtube\.com\/playlist|[?&]list=/.test(l)) {
@@ -386,7 +399,10 @@ async function ytViaPc(url) {
     throw new Error("Pegá un link de YouTube (empieza con https://youtu.be/ o https://www.youtube.com/).");
   }
   pc.say("Buscando la PC…");
-  await pc.config("Transcribir un video de YouTube");
+  try { await pc.config("Transcribir un video de YouTube"); } catch {
+    pc.handoff([url]);
+    return { id: null, title: "", handoff: true };
+  }
   pc.say("Mandando el link a la PC…");
   const job = await (await pc.call("/api/jobs/youtube", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, mode: "piano" }),
@@ -441,10 +457,12 @@ async function submitNew() {
       if (!lines.length) throw new Error("Pegá el link de YouTube primero.");
       if (lines.length === 1 && !/[?&]list=/.test(lines[0])) {
         const t = await ytViaPc(lines[0]);
+        if (t.handoff) return;
         $("#ytUrl").value = "";
         msg.textContent = `«${t.title}» lista. Ya está en «Mis canciones».`;
       } else {
         const n = await ytBatchViaPc(lines);
+        if (!n) return;
         $("#ytUrl").value = "";
         msg.textContent = `Le mandé ${n} ${n === 1 ? "video" : "videos"} a la PC. Van a ir llegando solos a «Mis canciones» `
           + "a medida que se terminan (cada uno tarda unos minutos; podés cerrar la app).";
