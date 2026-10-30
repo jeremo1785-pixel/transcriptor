@@ -252,10 +252,13 @@
             <!-- Lo que hay que tocar: aca abajo, para no tapar las notas que llegan a la linea. -->
             <div class="f-need" id="fNeed" hidden></div>
             <span id="fNow" class="mono">0:00</span>
-            <div class="f-prog"><i id="fProgFill"></i></div>
+            <div class="f-prog"><span id="fProgTicks"></span><span id="fProgLoop" hidden></span><i id="fProgFill"></i><em id="fProgBar" hidden></em></div>
             <span id="fDur" class="mono">0:00</span>
             <button id="fLoop" class="f-loop" title="Repetir la parte donde estás (4 compases)"><svg class="ic"><use href="#i-loop"/></svg> <span>Repetir parte</span></button>
+            <span id="fLoopInfo" class="f-loop-info" hidden></span>
           </div>
+          <!-- Racha: «¡25 seguidas!» cada tanto, en el medio de la pantalla. -->
+          <div class="f-streak" id="fStreak"></div>
           <!-- Practica: lo que hay que tocar y como vas, arriba de las notas. -->
           <div class="hud" id="hud" hidden>
             <div id="pStatus" class="p-status"></div>
@@ -274,6 +277,7 @@
                 <span><b id="sumHits">0</b> notas bien</span>
                 <span><b id="sumMiss">0</b> errores</span>
                 <span><b id="sumTime">0:00</b> practicando</span>
+                <span><b id="sumStreak">0</b> seguidas sin errar</span>
               </div>
               <div id="sumParts" class="sum-parts"></div>
               <div class="sum-actions">
@@ -373,6 +377,9 @@
             <div class="p-label">Qué tocás vos</div>
             <div id="pParts" class="p-parts"></div>
             <label class="check"><input type="checkbox" id="pWait" checked> Esperar a que toque la nota</label>
+            <div class="field"><span>Repitiendo una parte, si me equivoco, volver a empezarla con</span>
+              <select id="pLoopErr"><option value="0" selected>Nunca</option><option value="1">1 error</option>
+                <option value="3">3 errores</option><option value="5">5 errores</option></select></div>
             <label class="check"><input type="checkbox" id="pHear"> Escuchar también mi parte</label>
             <label class="check" id="pEchoRow"><input type="checkbox" id="pEcho"> Sonar lo que toco <small>(teclados sin parlante)</small></label>
             <button class="ghost wide" id="pRestart"><svg class="ic"><use href="#i-restart"/></svg> Empezar de nuevo</button>
@@ -412,6 +419,7 @@
           <label class="check"><input type="checkbox" id="optLatin" checked> Do-Re-Mi (en vez de C-D-E)</label>
           <label class="check"><input type="checkbox" id="optFx" checked> Efectos de luz y chispas</label>
           <label class="check"><input type="checkbox" id="optFull"> Teclado completo (88 teclas)</label>
+          <label class="check"><input type="checkbox" id="optKeyNames"> Letras en todas las teclas</label>
           <div class="field"><span>Velocidad de caída</span>
             <input type="range" id="zoom" min="60" max="400" value="170"></div>
 
