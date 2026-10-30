@@ -2619,7 +2619,7 @@ const roll = {
         if (!k) continue;
         const y1 = hit - (s - t) * pps, y0 = hit - (e - t) * pps;
         const on = s <= t && t < e;
-        if (on) active.set(p, tr.color);
+        if (on && !(active.get(p)?.s > s)) active.set(p, { c: tr.color, s });
         if (fx && flowing && !dim && s > this.prevT && s <= t) {
           this.burst(k.x + k.w / 2, hit, tr.color, k.black ? 8 : 12, k.w * 0.6);
         }
@@ -2705,9 +2705,12 @@ const roll = {
     }
 
     // Luz de cada tecla: prendida mientras suena, se apaga suave al soltarse.
-    for (const [p, c] of active) {
+    for (const [p, A] of active) {
+      // Fuerte al tocarse y en medio segundo mas suave mientras sigue sonando: con
+      // el pedal una nota dura varios segundos y la tecla parecia trabada.
+      const a = Math.max(0.28, 1 - (Math.max(0, t - A.s) / 0.5) * 0.72);
       const gl = this.glow.get(p);
-      if (gl) { gl.c = c; gl.a = 1; } else this.glow.set(p, { c, a: 1 });
+      if (gl) { gl.c = A.c; gl.a = a; } else this.glow.set(p, { c: A.c, a });
     }
     for (const [p, gl] of this.glow) {
       if (active.has(p)) continue;
